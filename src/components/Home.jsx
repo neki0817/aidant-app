@@ -1,15 +1,34 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { usePoints } from '../hooks/usePoints';
 
 // 仮のホーム画面（後でメイン画面に置き換える）
 const Home = () => {
+  const navigate = useNavigate();
   const { currentUser, logout } = useAuth();
+  const { pointBalance, grantPoints } = usePoints();
 
   const handleLogout = async () => {
     try {
       await logout();
     } catch (error) {
       console.error('ログアウトエラー:', error);
+    }
+  };
+
+  const handleStartChat = () => {
+    navigate('/chat');
+  };
+
+  // テスト用：ポイント付与
+  const handleGrantTestPoints = async () => {
+    try {
+      await grantPoints(1000, 'テスト用ポイント付与');
+      alert('1000ポイントを付与しました！');
+    } catch (error) {
+      console.error('ポイント付与エラー:', error);
+      alert('ポイント付与に失敗しました');
     }
   };
 
@@ -23,13 +42,26 @@ const Home = () => {
             <strong>メールアドレス:</strong> {currentUser?.email}
           </p>
           <p style={styles.infoText}>
-            <strong>ポイント:</strong> {currentUser?.points || 0}pt
+            <strong>ポイント残高:</strong> {pointBalance.toLocaleString()}pt
           </p>
         </div>
 
-        <button onClick={handleLogout} style={styles.button}>
-          ログアウト
-        </button>
+        <div style={styles.buttonGroup}>
+          <button onClick={handleStartChat} style={styles.primaryButton}>
+            補助金申請を開始
+          </button>
+          <button onClick={handleLogout} style={styles.secondaryButton}>
+            ログアウト
+          </button>
+        </div>
+
+        {/* テスト用ポイント付与ボタン */}
+        <div style={styles.testSection}>
+          <p style={styles.testLabel}>🧪 テスト機能</p>
+          <button onClick={handleGrantTestPoints} style={styles.testButton}>
+            +1000pt 付与（テスト用）
+          </button>
+        </div>
 
         <p style={styles.note}>
           ※ これは仮のホーム画面です。後でメイン画面に置き換えます。
@@ -72,7 +104,24 @@ const styles = {
     margin: '10px 0',
     textAlign: 'left'
   },
-  button: {
+  buttonGroup: {
+    display: 'flex',
+    gap: '12px',
+    justifyContent: 'center',
+    marginBottom: '20px'
+  },
+  primaryButton: {
+    padding: '12px 24px',
+    fontSize: '16px',
+    fontWeight: '600',
+    color: 'white',
+    backgroundColor: '#28a745',
+    border: 'none',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    flex: 1
+  },
+  secondaryButton: {
     padding: '12px 24px',
     fontSize: '16px',
     fontWeight: '600',
@@ -80,13 +129,38 @@ const styles = {
     backgroundColor: '#dc3545',
     border: 'none',
     borderRadius: '4px',
-    cursor: 'pointer'
+    cursor: 'pointer',
+    flex: 1
   },
   note: {
     marginTop: '30px',
     fontSize: '14px',
     color: '#666',
     fontStyle: 'italic'
+  },
+  testSection: {
+    marginTop: '30px',
+    padding: '20px',
+    backgroundColor: '#fff3cd',
+    borderRadius: '4px',
+    border: '1px dashed #ffc107'
+  },
+  testLabel: {
+    fontSize: '14px',
+    fontWeight: '600',
+    color: '#856404',
+    marginBottom: '10px'
+  },
+  testButton: {
+    padding: '10px 20px',
+    fontSize: '14px',
+    fontWeight: '600',
+    color: 'white',
+    backgroundColor: '#ffc107',
+    border: 'none',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    width: '100%'
   }
 };
 

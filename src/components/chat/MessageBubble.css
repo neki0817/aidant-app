@@ -1,0 +1,389 @@
+/* MessageBubble.css */
+.message-bubble {
+  display: flex;
+  margin-bottom: 16px;
+  animation: fadeIn 0.3s ease-in;
+}
+
+.message-bubble.ai {
+  justify-content: flex-start;
+}
+
+.message-bubble.user {
+  justify-content: flex-end;
+}
+
+.message-content {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  max-width: 70%;
+}
+
+.message-bubble.user .message-content {
+  flex-direction: row-reverse;
+}
+
+.ai-avatar,
+.user-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+  flex-shrink: 0;
+}
+
+.ai-avatar {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.user-avatar {
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  color: white;
+}
+
+.message-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.message-text {
+  background: white;
+  padding: 12px 16px;
+  border-radius: 18px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  margin-bottom: 8px;
+  line-height: 1.4;
+  word-wrap: break-word;
+}
+
+.message-bubble.user .message-text {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.message-timestamp {
+  font-size: 0.7rem;
+  color: #999;
+  padding: 0 4px;
+}
+
+.message-bubble.ai .message-timestamp {
+  text-align: left;
+}
+
+.message-bubble.user .message-timestamp {
+  text-align: right;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* 質問コンテンツのスタイル */
+.question-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.option-button {
+  background: white;
+  border: 2px solid #e1e5e9;
+  border-radius: 12px;
+  padding: 12px 16px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+  font-size: 0.9rem;
+  color: #333;
+}
+
+.option-button:hover {
+  border-color: #667eea;
+  background: #f8f9ff;
+  transform: translateY(-1px);
+}
+
+.option-button:active {
+  transform: translateY(0);
+}
+
+.option-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.question-options.multi-select {
+  gap: 12px;
+}
+
+.option-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: white;
+  border: 2px solid #e1e5e9;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.option-checkbox:hover {
+  border-color: #667eea;
+  background: #f8f9ff;
+}
+
+.option-checkbox input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: #667eea;
+}
+
+.checkbox-label {
+  font-size: 0.9rem;
+  color: #333;
+  flex: 1;
+}
+
+.confirm-button {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 16px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  margin-top: 8px;
+}
+
+.confirm-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+.confirm-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.question-input,
+.question-textarea,
+.question-date,
+.question-number {
+  margin-top: 12px;
+}
+
+.question-input input,
+.question-textarea textarea,
+.question-date input,
+.question-number input {
+  width: 100%;
+  padding: 12px 16px;
+  border: 2px solid #e1e5e9;
+  border-radius: 12px;
+  font-size: 0.9rem;
+  transition: border-color 0.2s ease;
+  box-sizing: border-box;
+}
+
+.question-input input:focus,
+.question-textarea textarea:focus,
+.question-date input:focus,
+.question-number input:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.question-textarea {
+  position: relative;
+}
+
+.textarea-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.char-count {
+  font-size: 0.8rem;
+  color: #666;
+}
+
+.question-text p {
+  margin: 0;
+  padding: 12px 16px;
+  background: #f8f9fa;
+  border-radius: 12px;
+  border-left: 4px solid #667eea;
+}
+
+/* ユーザー回答のスタイル */
+.user-answer {
+  background: rgba(255, 255, 255, 0.1);
+  padding: 8px 12px;
+  border-radius: 8px;
+  margin-top: 8px;
+  font-size: 0.9rem;
+}
+
+.user-answer strong {
+  display: block;
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+
+.user-answer ul {
+  margin: 4px 0 0 0;
+  padding-left: 16px;
+}
+
+.user-answer li {
+  margin-bottom: 2px;
+}
+
+/* 選択肢リストのスタイル（番号付き） */
+.question-options-list {
+  margin-top: 12px;
+  padding: 12px;
+  background: #f8f9fa;
+  border-radius: 12px;
+  border-left: 4px solid #667eea;
+}
+
+.option-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.option-number {
+  font-weight: 600;
+  color: #667eea;
+  min-width: 24px;
+  flex-shrink: 0;
+}
+
+.option-text {
+  color: #333;
+  flex: 1;
+}
+
+.input-hint {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #e1e5e9;
+  font-size: 0.8rem;
+  color: #666;
+  font-style: italic;
+}
+
+/* 回答例のスタイル */
+.answer-examples {
+  margin-top: 12px;
+  padding: 0;
+}
+
+.examples-label {
+  font-size: 0.75rem;
+  color: #999;
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.example-bubble {
+  background: #f8f9ff;
+  border: 1px solid #e1e5f1;
+  border-radius: 12px;
+  padding: 8px 12px;
+  margin-bottom: 6px;
+  font-size: 0.85rem;
+  color: #555;
+  line-height: 1.4;
+  animation: slideIn 0.3s ease-out;
+  transition: all 0.2s ease;
+  cursor: default;
+}
+
+.example-bubble:last-child {
+  margin-bottom: 0;
+}
+
+.example-bubble:hover {
+  background: #eef1ff;
+  border-color: #667eea;
+  transform: translateX(4px);
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* アニメーション */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* レスポンシブデザイン */
+@media (max-width: 768px) {
+  .message-content {
+    max-width: 85%;
+  }
+  
+  .option-button,
+  .option-checkbox {
+    padding: 10px 14px;
+    font-size: 0.85rem;
+  }
+  
+  .question-input input,
+  .question-textarea textarea,
+  .question-date input,
+  .question-number input {
+    padding: 10px 14px;
+    font-size: 0.85rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .message-content {
+    max-width: 90%;
+  }
+  
+  .ai-avatar,
+  .user-avatar {
+    width: 32px;
+    height: 32px;
+    font-size: 1rem;
+  }
+  
+  .message-text {
+    padding: 10px 14px;
+    font-size: 0.9rem;
+  }
+}

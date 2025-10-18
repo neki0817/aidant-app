@@ -5,8 +5,11 @@ import {
   signOut,
   onAuthStateChanged
 } from 'firebase/auth';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, addDoc, collection } from 'firebase/firestore';
 import { auth, db } from '../firebase';
+
+// デバッグ用：AuthContextでのFirestoreインスタンス確認
+console.log('AuthContext firestore instance:', db);
 
 // Contextを作成
 const AuthContext = createContext();
@@ -34,10 +37,21 @@ export const AuthProvider = ({ children }) => {
 
       // Firestoreのusersコレクションにユーザードキュメントを作成
       await setDoc(doc(db, 'users', user.uid), {
+        userId: user.uid,
         email: user.email,
-        points: 5000, // 初期ポイント
-        createdAt: new Date().toISOString(),
+        pointBalance: 5000, // 初期ポイント
+        createdAt: new Date(),
+        updatedAt: new Date(),
         ...additionalData
+      });
+
+      // 初期ポイント付与のトランザクション記録
+      await addDoc(collection(db, 'point_transactions'), {
+        userId: user.uid,
+        type: 'grant',
+        amount: 5000,
+        description: '新規登録',
+        timestamp: new Date()
       });
 
       return user;
@@ -71,6 +85,7 @@ export const AuthProvider = ({ children }) => {
   // ユーザー情報を取得
   const getUserData = async (uid) => {
     try {
+      console.log('getUserData called with uid:', uid, 'db:', db);
       const userDoc = await getDoc(doc(db, 'users', uid));
       if (userDoc.exists()) {
         return userDoc.data();
@@ -86,9 +101,15 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
-        // ユーザー情報をFirestoreから取得
-        const userData = await getUserData(user.uid);
-        setCurrentUser({ ...user, ...userData });
+        try {
+          // ユーザー情報をFirestoreから取得
+          const userData = await getUserData(user.uid);
+          setCurrentUser({ ...user, ...userData });
+        } catch (error) {
+          console.error('認証状態監視エラー:', error);
+          // エラーが発生してもユーザー情報は設定する
+          setCurrentUser(user);
+        }
       } else {
         setCurrentUser(null);
       }

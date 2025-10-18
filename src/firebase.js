@@ -21,5 +21,8 @@ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 
+// デバッグ用：Firestoreインスタンスの確認
+console.log('Firebase initialized:', { app, auth, db });
+
 export default app;
 
