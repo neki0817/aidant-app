@@ -167,9 +167,17 @@ const QuestionInput = ({ question, onAnswer, isLoading, previousAnswer, onGoBack
     // バリデーションチェック
     if (question.validation && typeof question.validation === 'function') {
       const validationResult = question.validation(answer, allAnswers);
+
+      // エラー（申請不可）
       if (!validationResult.isValid) {
         alert(validationResult.message);
         return;
+      }
+
+      // 警告（申請可能だが確認が必要）
+      if (validationResult.warning) {
+        alert(validationResult.warning);
+        // 警告は表示するが、回答は続行
       }
     }
 

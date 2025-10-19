@@ -326,6 +326,28 @@
   transform: translateX(4px);
 }
 
+/* ヘルプテキストのスタイル */
+.help-text {
+  margin-top: 12px;
+  padding: 12px;
+  background: #fff9e6;
+  border: 1px solid #ffd966;
+  border-left: 4px solid #ffb300;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  color: #5a4a00;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.help-text > div {
+  margin-bottom: 4px;
+}
+
+.help-text > div:last-child {
+  margin-bottom: 0;
+}
+
 @keyframes slideIn {
   from {
     opacity: 0;

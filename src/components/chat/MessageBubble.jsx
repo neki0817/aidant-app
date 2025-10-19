@@ -61,6 +61,21 @@ const MessageBubble = ({ message, onAnswer, isLoading }) => {
     );
   };
 
+  // ヘルプテキストを表示
+  const renderHelpText = () => {
+    if (!question || !question.helpText) {
+      return null;
+    }
+
+    return (
+      <div className="help-text">
+        {question.helpText.split('\n').map((line, index) => (
+          <div key={index}>{line}</div>
+        ))}
+      </div>
+    );
+  };
+
   // ここでの入力UIは使用しない（QuestionInputで一元管理）
   const renderQuestionContent = () => null;
 
@@ -127,9 +142,10 @@ const MessageBubble = ({ message, onAnswer, isLoading }) => {
             {type === 'user' && renderUserAnswer()}
           </div>
 
-          {/* AIメッセージの場合に選択肢または回答例を表示 */}
+          {/* AIメッセージの場合に選択肢・回答例・ヘルプテキストを表示 */}
           {type === 'ai' && renderOptions()}
           {type === 'ai' && renderExamples()}
+          {type === 'ai' && renderHelpText()}
 
           <div className="message-timestamp">
             {formatTimestamp(timestamp)}
