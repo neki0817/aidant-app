@@ -21,12 +21,19 @@ const MessageBubble = ({ message, onAnswer, isLoading }) => {
 
     return (
       <div className="question-options-list">
-        {question.options.map((option, index) => (
-          <div key={index} className="option-item">
-            <span className="option-number">{index + 1}.</span>
-            <span className="option-text">{option}</span>
-          </div>
-        ))}
+        {question.options.map((option, index) => {
+          // optionが{value, label}形式のオブジェクトの場合はlabelを表示
+          const displayText = typeof option === 'object' && option.label
+            ? option.label
+            : option;
+
+          return (
+            <div key={index} className="option-item">
+              <span className="option-number">{index + 1}.</span>
+              <span className="option-text">{displayText}</span>
+            </div>
+          );
+        })}
         <div className="input-hint">
           {isMultiSelect
             ? '💡 複数選択可（例: 1,3,5）'

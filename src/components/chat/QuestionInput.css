@@ -142,3 +142,51 @@
     min-height: 60px;
   }
 }
+
+/* 「その他」入力欄のスタイル */
+.other-input-area {
+  margin-top: 12px;
+  padding: 12px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border-left: 4px solid #667eea;
+}
+
+.other-input-label {
+  display: block;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 8px;
+}
+
+.other-input-field {
+  width: 100%;
+  margin: 0;
+}
+
+/* スキップボタンのスタイル */
+.skip-button-simple {
+  flex-shrink: 0;
+  min-width: 80px;
+  height: 40px;
+  background: white;
+  color: #999;
+  border: 2px solid #ddd;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.skip-button-simple:hover:not(:disabled) {
+  background: #f5f5f5;
+  border-color: #bbb;
+  color: #666;
+}
+
+.skip-button-simple:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

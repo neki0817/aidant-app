@@ -3,9 +3,15 @@ import { useApplication } from '../../contexts/ApplicationContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePoints } from '../../hooks/usePoints';
 import { enhanceAnswer, generateAnswerDraft } from '../../services/openai/openai';
+import { generateAIQuestions, generateFollowUpQuestion } from '../../services/openai/aiQuestionGenerator';
+import { runAutonomousLoop, checkProgressAndSuggestNextFocus, runFinalCheck, resetAgentSession } from '../../services/ai/autonomousAgent';
+import { calculateOverallCompleteness, generateProgressSummary } from '../../services/ai/completionTracker';
+import { getNextStep1Question, isStep1Complete, getAutoAnswerFromGoogleMaps } from '../../services/ai/conversationalQuestionsStep1';
+import { isUserQuestion, answerUserQuestion } from '../../services/ai/conversationalFlow';
 import MessageBubble from './MessageBubble';
 import QuestionInput from './QuestionInput';
 import ProgressBar from './ProgressBar';
+import CompletenessIndicator from './CompletenessIndicator';
 import ApplicationDocument from '../document/ApplicationDocument';
 import AiDraftOptions from './AiDraftOptions';
 import './ChatContainer.css';
@@ -32,6 +38,15 @@ const ChatContainer = () => {
   const [pendingAnswer, setPendingAnswer] = useState(null); // 補完待ちの回答
   const [aiDraft, setAiDraft] = useState(null); // AI生成下書き
   const [showAiOptions, setShowAiOptions] = useState(false); // AI提案の3択UI表示
+  const [aiQuestions, setAiQuestions] = useState([]); // AI生成質問リスト
+  const [aiQuestionIndex, setAiQuestionIndex] = useState(0); // 現在のAI質問インデックス
+  const [aiAnalysis, setAiAnalysis] = useState(''); // AI分析結果
+
+  // 完全自律AIエージェント用の状態
+  const [autonomousMode, setAutonomousMode] = useState(true); // 自律モードON/OFF
+  const [completenessScore, setCompletenessScore] = useState(0); // 完成度スコア
+  const [showCompletenessDetails, setShowCompletenessDetails] = useState(false); // 完成度詳細表示
+
   const messagesEndRef = useRef(null);
 
   // メッセージを自動スクロール
@@ -69,13 +84,108 @@ const ChatContainer = () => {
       const question = getCurrentQuestion();
       if (question) {
         addAIMessage(question.text, question);
+
+        // helpTextがあれば、別の吹き出しで表示
+        if (question.helpText) {
+          addAIMessage(question.helpText);
+        }
+
+        // placeholderをGoogle Maps情報から動的生成
+        let placeholderText = question.placeholder;
+
+        // Q1-3の場合、Google Mapsの業種情報から例を生成
+        if (question.id === 'Q1-3' && answers['Q1-0']) {
+          const placeInfo = answers['Q1-0'];
+          if (placeInfo.types && placeInfo.types.length > 0) {
+            const serviceHint = inferServicesFromPlaceTypes(placeInfo.types, placeInfo.name);
+            if (serviceHint) {
+              placeholderText = `💡 Google Mapsの情報から「${serviceHint}」のようです。`;
+            }
+          }
+        }
+
+        // placeholderがあれば、例として表示
+        if (placeholderText) {
+          addAIMessage(placeholderText);
+        }
       }
     }
   }, [currentApplication]);
 
+  // Step 4開始時にAI質問を生成
+  useEffect(() => {
+    const initializeStep4 = async () => {
+      // Step 4で、まだAI質問が生成されていない場合
+      if (currentStep === 4 && aiQuestions.length === 0 && Object.keys(answers).length > 0) {
+        console.log('[AI Questions] Initializing Step 4 with AI questions...');
+
+        try {
+          setIsLoading(true);
+          addAIMessage('口コミ情報とこれまでの回答を分析しています...');
+
+          // Google Maps情報と既存回答を取得
+          const placeData = answers['Q2-0'];
+          const result = await generateAIQuestions(placeData, answers);
+
+          console.log('[AI Questions] Generated:', result);
+
+          // AI分析結果を表示
+          setAiAnalysis(result.analysis);
+          addAIMessage(`【分析結果】\n${result.analysis}\n\nこれらを踏まえて、いくつか質問させてください。`);
+
+          // AI質問を保存
+          setAiQuestions(result.questions);
+          setAiQuestionIndex(0);
+
+          // 最初の質問を表示
+          if (result.questions.length > 0) {
+            const firstQuestion = result.questions[0];
+            setCurrentQuestion(firstQuestion);
+            addAIMessage(firstQuestion.text, firstQuestion);
+          }
+
+          setIsLoading(false);
+        } catch (error) {
+          console.error('[AI Questions] Error:', error);
+          addAIMessage('AI質問の生成中にエラーが発生しました。標準的な質問を使用します。');
+          setIsLoading(false);
+
+          // エラー時は通常のStep 4質問を使用
+          const question = getCurrentQuestion();
+          if (question) {
+            setCurrentQuestion(question);
+            addAIMessage(question.text, question);
+          }
+        }
+        return;
+      }
+    };
+
+    initializeStep4();
+  }, [currentStep, answers]);
+
   // 現在の質問を取得
   useEffect(() => {
     console.log('useEffect triggered - currentStep:', currentStep, 'answers:', answers);
+
+    // Step 4の場合はAI質問を使用
+    if (currentStep === 4 && aiQuestions.length > 0) {
+      return; // AI質問モードでは通常の質問取得をスキップ
+    }
+
+    // Step 1の場合、Google Mapsから自動回答できるかチェック
+    if (currentStep === 1) {
+      const autoAnswer = getAutoAnswerFromGoogleMaps(answers);
+      if (autoAnswer) {
+        console.log('[Auto Answer] Google Mapsから自動回答:', autoAnswer);
+
+        // 自動回答を適用
+        addAIMessage(`💡 Google Mapsの営業時間情報から「${autoAnswer.answer}」と判断しました。`);
+        updateAnswer(autoAnswer.questionId, autoAnswer.answer);
+        return; // 次の質問へ
+      }
+    }
+
     const question = getCurrentQuestion();
     console.log('Setting currentQuestion to:', question?.id || 'null');
 
@@ -87,8 +197,23 @@ const ChatContainer = () => {
       if (Object.keys(answers).length > 0) {
         addAIMessage(question.text, question);
 
-        // AI自動生成は無効化（ユーザー入力後にenhanceAnswerで補完する）
-        // generateAiDraftForQuestion(question);
+        // Q1-3の場合、Google Mapsの業種情報から3段階で提示
+        if (question.id === 'Q1-3' && answers['Q1-0']) {
+          const placeInfo = answers['Q1-0'];
+          if (placeInfo.types && placeInfo.types.length > 0) {
+            const serviceHint = inferServicesFromPlaceTypes(placeInfo.types, placeInfo.name);
+            if (serviceHint) {
+              // ②Google Mapsから推測した内容を提示
+              addAIMessage(`💡 Google Mapsの情報から、${placeInfo.name}のサービスは「${serviceHint}」です。`);
+
+              // ③修正・追加の案内
+              addAIMessage('この内容で問題なければそのまま送信、修正や追加がある場合は入力してください。');
+            }
+          }
+        } else if (question.placeholder) {
+          // 通常のplaceholder表示
+          addAIMessage(`💡 ${question.placeholder}`);
+        }
       }
     } else if (!question && currentQuestion) {
       // 質問がなくなった（ステップ完了）
@@ -150,6 +275,83 @@ const ChatContainer = () => {
       return;
     }
 
+    // Step 4のAI質問モードの場合の処理
+    if (currentStep === 4 && aiQuestions.length > 0) {
+      console.log('[AI Questions] Handling answer for AI question:', {
+        questionId,
+        currentIndex: aiQuestionIndex,
+        totalQuestions: aiQuestions.length
+      });
+
+      try {
+        setIsLoading(true);
+
+        // ユーザーメッセージを追加
+        const answerText = formatAnswerText(questionId, answer);
+        addUserMessage(answerText, answer);
+
+        // 回答を保存
+        const questionCost = 10; // AI質問のコストは一律10pt
+        await saveAnswer(questionId, answer, questionCost);
+
+        // 次のAI質問へ進む、または完了
+        const nextIndex = aiQuestionIndex + 1;
+        if (nextIndex < aiQuestions.length) {
+          // まだAI質問がある場合
+          setAiQuestionIndex(nextIndex);
+          const nextQuestion = aiQuestions[nextIndex];
+          setCurrentQuestion(nextQuestion);
+          addAIMessage(nextQuestion.text, nextQuestion);
+        } else {
+          // すべてのAI質問が完了
+          console.log('[AI Questions] All AI questions completed');
+          addAIMessage('課題分析が完了しました。次のステップに進みます。');
+
+          // AI質問モードをリセット
+          setAiQuestions([]);
+          setAiQuestionIndex(0);
+          setCurrentQuestion(null);
+
+          // Step 4完了
+          setTimeout(() => {
+            handleStepComplete();
+          }, 2000);
+        }
+
+        setIsLoading(false);
+        return; // AI質問モードでは以降の処理をスキップ
+      } catch (error) {
+        console.error('[AI Questions] Error handling answer:', error);
+        addAIMessage('回答の保存に失敗しました。もう一度お試しください。');
+        setIsLoading(false);
+        return;
+      }
+    }
+
+    // Q2-6: 従業員数の上限チェック
+    if (questionId === 'Q2-6') {
+      const limit = getEmployeeLimit();
+      const employeeCount = answer;
+
+      // 従業員数を数値に変換
+      let count = 0;
+      if (employeeCount.includes('0人')) count = 0;
+      else if (employeeCount.includes('1人')) count = 1;
+      else if (employeeCount.includes('2人')) count = 2;
+      else if (employeeCount.includes('3人')) count = 3;
+      else if (employeeCount.includes('4人')) count = 4;
+      else if (employeeCount.includes('5人')) count = 5;
+      else if (employeeCount.includes('6～10人')) count = 8;
+      else if (employeeCount.includes('11～20人')) count = 15;
+      else if (employeeCount.includes('21人以上')) count = 21;
+
+      if (count > limit) {
+        addAIMessage(`⚠️ 重要なお知らせ\n\nあなたの業種（${answers['Q1-1']}）の場合、常時雇用従業員は${limit}人以下が対象です。\n\n現在の従業員数（${employeeCount}）では、この補助金の対象外となる可能性があります。\n\n従業員数をご確認の上、もう一度選択し直してください。`);
+        setIsLoading(false);
+        return;
+      }
+    }
+
     // Q1-3 & Q5-2: 取組内容の補助金規定チェック
     if (questionId === 'Q1-3' || questionId === 'Q5-2') {
       const webOnlyItems = [
@@ -198,6 +400,22 @@ const ChatContainer = () => {
     try {
       setIsLoading(true);
 
+      // 【対話型】ユーザーが質問しているかチェック
+      if (typeof answer === 'string' && isUserQuestion(answer)) {
+        console.log('[Conversational] User is asking a question:', answer);
+
+        // ユーザーの質問を表示
+        addUserMessage(answer, answer);
+
+        // AIが回答
+        const aiAnswer = await answerUserQuestion(currentQ, answer, { answers });
+        addAIMessage(aiAnswer);
+
+        // 同じ質問を再表示
+        setIsLoading(false);
+        return;
+      }
+
       // ポイント消費チェック
       const questionCost = getQuestionCost(questionId);
       if (questionCost > 0) {
@@ -231,10 +449,18 @@ const ChatContainer = () => {
             answer: answer.substring(0, 50)
           });
 
+          // Google Maps情報(Q1-0)または旧形式の店舗情報(Q2-0)を取得
+          const placeInfo = answers['Q1-0'] || answers['Q2-0'];
+
           const context = {
-            storeName: answers['Q2-0']?.name,
-            storeAddress: answers['Q2-0']?.address,
-            philosophy: answers['Q2-5']
+            storeName: placeInfo?.name,
+            storeAddress: placeInfo?.address,
+            philosophy: answers['Q2-5'],
+            // Google Mapsの口コミ情報を追加
+            rating: placeInfo?.rating,
+            userRatingsTotal: placeInfo?.userRatingsTotal,
+            reviews: placeInfo?.reviews, // 口コミテキスト配列
+            businessType: answers['Q1-1'] // 業種情報
           };
 
           addAIMessage('回答を補完しています...');
@@ -291,6 +517,80 @@ const ChatContainer = () => {
       if (questionCost > 0) {
         await consumePoints(questionCost, `質問回答: ${questionId}`);
       }
+
+      // 【完全自律AI】回答保存後、自律エージェントを起動
+      // ただし、Step 1は対話型フローを使用するため、自律エージェントはスキップ
+      if (currentStep === 1) {
+        console.log('[Conversational Flow] Step 1 - Using conversational flow (autonomous AI disabled)');
+      } else if (autonomousMode && currentQuestion) {
+        console.log('[Autonomous AI] Analyzing answer with autonomous agent...');
+
+        const updatedAnswers = { ...answers, [questionId]: answer };
+
+        try {
+          const agentAction = await runAutonomousLoop(
+            questionId,
+            currentQuestion,
+            answer,
+            updatedAnswers,
+            { placeInfo: answers['Q2-0'], currentStep }
+          );
+
+          console.log('[Autonomous AI] Agent action:', agentAction);
+
+          // エージェントのアクションに応じて処理
+          console.log('[ChatContainer] Processing agent action:', agentAction.action);
+
+          if (agentAction.action === 'deep_dive' && agentAction.data) {
+            // 深堀り質問を表示
+            console.log('[ChatContainer] Showing deep dive question:', agentAction.data);
+            addAIMessage(agentAction.message);
+            setCurrentQuestion(agentAction.data);
+            addAIMessage(agentAction.data.text, agentAction.data);
+            return; // 通常フローをスキップ
+          } else if (agentAction.action === 'business_detail_question' && agentAction.data) {
+            // 業態・特性確認質問を表示
+            console.log('[ChatContainer] Showing business detail question:', agentAction.data);
+            addAIMessage(agentAction.message);
+            setCurrentQuestion(agentAction.data);
+            addAIMessage(agentAction.data.text, agentAction.data);
+            return; // 通常フローをスキップ
+          } else if (agentAction.action === 'industry_question' && agentAction.data) {
+            // 業種別の深堀り質問を表示
+            console.log('[ChatContainer] Showing industry question:', agentAction.data);
+            addAIMessage(agentAction.message);
+            setCurrentQuestion(agentAction.data);
+            addAIMessage(agentAction.data.text, agentAction.data);
+            return; // 通常フローをスキップ
+          } else if (agentAction.action === 'flag_critical_issue') {
+            // 重大な問題を指摘
+            console.log('[ChatContainer] Flagging critical issue');
+            addAIMessage(agentAction.message);
+          } else if (agentAction.action === 'flag_high_priority_issue') {
+            // 高優先度の問題を指摘
+            console.log('[ChatContainer] Flagging high priority issue');
+            addAIMessage(agentAction.message);
+          } else if (agentAction.action === 'suggest_improvement') {
+            // 改善提案を表示
+            console.log('[ChatContainer] Suggesting improvement');
+            if (agentAction.message) {
+              addAIMessage(agentAction.message);
+            }
+          } else if (agentAction.action === 'proceed') {
+            console.log('[ChatContainer] Agent says proceed with normal flow');
+          }
+
+          // 完成度スコアを更新
+          const completeness = calculateOverallCompleteness(updatedAnswers);
+          setCompletenessScore(completeness.overallScore);
+          console.log('[Autonomous AI] Completeness updated:', completeness.overallScore + '%');
+
+        } catch (agentError) {
+          console.error('[Autonomous AI] Agent error:', agentError);
+          // エラーでも処理を続行
+        }
+      }
+
     } catch (e) {
       console.error('saveAnswer failed:', e);
       addAIMessage('回答の保存に失敗しました。ネットワーク状態を確認してもう一度お試しください。');
@@ -471,24 +771,39 @@ const ChatContainer = () => {
   const getQuestionCost = (questionId) => {
     const costs = {
       'Q1-1': 0, 'Q1-2': 0, 'Q1-3': 0,
-      'Q2-0': 0, 'Q2-1': 0, 'Q2-2': 10, 'Q2-3': 10, 'Q2-4': 10, 'Q2-5': 10,
-      'Q2-6': 10, 'Q2-7-1': 10, 'Q2-7-2': 10, 'Q2-7-3': 10, 'Q2-8': 10, 'Q2-9': 10,
-      'Q3-1': 20, 'Q3-2': 0, 'Q3-3': 10, 'Q3-4': 10, 'Q3-5': 10, 'Q3-6': 20, 'Q3-7': 10,
+      'Q2-0': 0, 'Q2-1': 0, 'Q2-2': 10, 'Q2-2-1': 10, 'Q2-3': 10, 'Q2-4': 10, 'Q2-5': 10,
+      'Q2-6': 10, 'Q2-7-1': 10, 'Q2-7-2': 10, 'Q2-7-3': 10, 'Q2-7-1-profit': 10, 'Q2-7-2-profit': 10, 'Q2-7-3-profit': 10, 'Q2-9': 10, 'Q2-10': 0, 'Q2-11': 10, 'Q2-12': 10, 'Q2-13': 10,
+      'Q3-1': 10, 'Q3-1-1': 10, 'Q3-2': 0, 'Q3-3': 10, 'Q3-4': 10, 'Q3-5': 10, 'Q3-6': 20, 'Q3-7': 10, 'Q3-8': 10, 'Q3-9': 10,
       'Q4-1': 10, 'Q4-2': 10, 'Q4-3': 10, 'Q4-4': 10, 'Q4-5': 10,
       'Q4-6': 10, 'Q4-7': 10, 'Q4-8': 20, 'Q4-9': 20, 'Q4-10': 10, 'Q4-11': 10,
-      'Q5-1': 20, 'Q5-2': 20, 'Q5-3': 15, 'Q5-4': 15, 'Q5-5': 15, 'Q5-6': 15,
-      'Q5-7': 30, 'Q5-8': 10, 'Q5-9': 10, 'Q5-10': 20, 'Q5-11': 10, 'Q5-12': 10, 'Q5-13': 10, 'Q5-14': 10
+      'Q5-1': 20, 'Q5-2': 20, 'Q5-3': 15, 'Q5-4': 15, 'Q5-5': 15, 'Q5-6': 15, 'Q5-6-1': 0,
+      'Q5-7': 30, 'Q5-8': 10, 'Q5-9': 10, 'Q5-10': 20, 'Q5-11': 10, 'Q5-12': 10, 'Q5-13': 10, 'Q5-14': 10, 'Q5-15': 10
     };
     return costs[questionId] || 0;
   };
 
   // 現在の質問を取得（回答済み質問を除外）
   const getCurrentQuestion = () => {
+    // Step 1は対話型フローを使用
+    if (currentStep === 1) {
+      const nextQuestion = getNextStep1Question(answers);
+      console.log('[Conversational] Step 1 next question:', nextQuestion?.id || 'complete');
+
+      // Step 1完了チェック
+      if (!nextQuestion && isStep1Complete(answers)) {
+        console.log('[Conversational] Step 1 complete!');
+        return null; // Step 1完了
+      }
+
+      return nextQuestion;
+    }
+
+    // Step 2以降は従来のフロー
     const questions = getStepQuestions(currentStep);
-    const answeredQuestions = Object.keys(answers).filter(qId => 
+    const answeredQuestions = Object.keys(answers).filter(qId =>
       questions.some(q => q.id === qId)
     );
-    
+
     console.log('getCurrentQuestion:', {
       currentStep,
       questions: questions.map(q => q.id),
@@ -496,7 +811,7 @@ const ChatContainer = () => {
       answers,
       answersKeys: Object.keys(answers)
     });
-    
+
     const nextQuestion = questions.find(q => !answeredQuestions.includes(q.id));
     console.log('nextQuestion:', nextQuestion?.id || 'none');
     return nextQuestion;
@@ -514,6 +829,38 @@ const ChatContainer = () => {
       nextQuestion: questions[currentIndex + 1]?.id || 'none'
     });
     return questions[currentIndex + 1];
+  };
+
+  // 業種別の従業員数上限を取得
+  const getEmployeeLimit = () => {
+    const businessType = answers['Q1-1'] || '';
+
+    // 業種別の従業員数上限
+    const limits = {
+      '飲食店': 5,
+      '小売業': 5,
+      '美容・理容業': 5,
+      '生活関連サービス': 5,
+      '宿泊業': 20,
+      '娯楽業': 20,
+      '教育・学習支援業': 5,
+      '医療・福祉': 5,
+      'その他サービス業': 5
+    };
+
+    for (const [key, limit] of Object.entries(limits)) {
+      if (businessType.includes(key)) {
+        return limit;
+      }
+    }
+
+    return 5; // デフォルト
+  };
+
+  // 従業員数のヘルプテキストを動的生成
+  const getEmployeeHelpText = () => {
+    const limit = getEmployeeLimit();
+    return `【常時雇用従業員とは】フルタイム勤務の正社員。経営者本人、同居家族、パート・アルバイトは含まない。あなたの業種は${limit}人以下が対象です。`;
   };
 
   // 営業年数を計算して売上質問を動的に生成
@@ -571,104 +918,201 @@ const ChatContainer = () => {
       // 3期以上 → 3期分の売上を個別に質問
       salesQuestions.push({
         id: 'Q2-7-1',
-        text: `${latestFiscalYear - 2}年${fiscalMonth}期（3期前）の年間売上を教えてください`,
+        text: `${latestFiscalYear - 3}年度（${latestFiscalYear - 2}年${fiscalMonth}期決算）の会社全体の年間売上を教えてください`,
         type: 'number',
         placeholder: '例：1200',
-        helpText: '万円単位で入力してください（例：1200万円の場合は「1200」と入力）',
+        helpText: '万円単位で入力してください（例：1200万円の場合は「1200」と入力）。決算書・確定申告書に記載されている会社全体の売上高を入力してください。',
+        required: true
+      });
+      salesQuestions.push({
+        id: 'Q2-7-1-profit',
+        text: `${latestFiscalYear - 3}年度（${latestFiscalYear - 2}年${fiscalMonth}期決算）の経常利益を教えてください`,
+        type: 'number',
+        placeholder: '例：150（黒字の場合）、-50（赤字の場合）',
+        helpText: '万円単位で入力してください。赤字の場合はマイナスを付けて入力（例：-50）。決算書・確定申告書に記載されている経常利益を入力してください。',
         required: true
       });
       salesQuestions.push({
         id: 'Q2-7-2',
-        text: `${latestFiscalYear - 1}年${fiscalMonth}期（2期前）の年間売上を教えてください`,
+        text: `${latestFiscalYear - 2}年度（${latestFiscalYear - 1}年${fiscalMonth}期決算）の会社全体の年間売上を教えてください`,
         type: 'number',
         placeholder: '例：1100',
-        helpText: '万円単位で入力してください',
+        helpText: '万円単位で入力してください。決算書・確定申告書に記載されている会社全体の売上高を入力してください。',
+        required: true
+      });
+      salesQuestions.push({
+        id: 'Q2-7-2-profit',
+        text: `${latestFiscalYear - 2}年度（${latestFiscalYear - 1}年${fiscalMonth}期決算）の経常利益を教えてください`,
+        type: 'number',
+        placeholder: '例：100（黒字の場合）、-30（赤字の場合）',
+        helpText: '万円単位で入力してください。赤字の場合はマイナスを付けて入力（例：-30）。決算書・確定申告書に記載されている経常利益を入力してください。',
         required: true
       });
       salesQuestions.push({
         id: 'Q2-7-3',
-        text: `${latestFiscalYear}年${fiscalMonth}期（直近期）の年間売上を教えてください`,
+        text: `${latestFiscalYear - 1}年度（${latestFiscalYear}年${fiscalMonth}期決算）の会社全体の年間売上を教えてください`,
         type: 'number',
         placeholder: '例：900',
-        helpText: '万円単位で入力してください',
+        helpText: '万円単位で入力してください。決算書・確定申告書に記載されている会社全体の売上高を入力してください。',
+        required: true
+      });
+      salesQuestions.push({
+        id: 'Q2-7-3-profit',
+        text: `${latestFiscalYear - 1}年度（${latestFiscalYear}年${fiscalMonth}期決算）の経常利益を教えてください`,
+        type: 'number',
+        placeholder: '例：80（黒字の場合）、-20（赤字の場合）',
+        helpText: '万円単位で入力してください。赤字の場合はマイナスを付けて入力（例：-20）。決算書・確定申告書に記載されている経常利益を入力してください。',
         required: true
       });
     } else if (fiscalYearsCount === 2) {
-      // 2期 → 2期分の売上 + 見込み
+      // 2期 → 2期分の売上・利益 + 見込み
       salesQuestions.push({
         id: 'Q2-7-1',
-        text: `${latestFiscalYear - 1}年${fiscalMonth}期（前期）の年間売上を教えてください`,
+        text: `${latestFiscalYear - 2}年度（${latestFiscalYear - 1}年${fiscalMonth}期決算）の会社全体の年間売上を教えてください`,
         type: 'number',
         placeholder: '例：800',
-        helpText: '万円単位で入力してください',
+        helpText: '万円単位で入力してください。決算書・確定申告書に記載されている会社全体の売上高を入力してください。',
+        required: true
+      });
+      salesQuestions.push({
+        id: 'Q2-7-1-profit',
+        text: `${latestFiscalYear - 2}年度（${latestFiscalYear - 1}年${fiscalMonth}期決算）の経常利益を教えてください`,
+        type: 'number',
+        placeholder: '例：60（黒字の場合）、-40（赤字の場合）',
+        helpText: '万円単位で入力してください。赤字の場合はマイナスを付けて入力。',
         required: true
       });
       salesQuestions.push({
         id: 'Q2-7-2',
-        text: `${latestFiscalYear}年${fiscalMonth}期（当期）の年間売上を教えてください`,
+        text: `${latestFiscalYear - 1}年度（${latestFiscalYear}年${fiscalMonth}期決算予定）の会社全体の年間売上を教えてください`,
         type: 'number',
         placeholder: '例：1000',
-        helpText: '万円単位で入力してください。確定していない場合は見込み額を入力してください',
+        helpText: '万円単位で入力してください。確定していない場合は見込み額を入力してください。',
+        required: true
+      });
+      salesQuestions.push({
+        id: 'Q2-7-2-profit',
+        text: `${latestFiscalYear - 1}年度（${latestFiscalYear}年${fiscalMonth}期決算予定）の経常利益を教えてください`,
+        type: 'number',
+        placeholder: '例：80（黒字の場合）、-20（赤字の場合）',
+        helpText: '万円単位で入力してください。確定していない場合は見込み額を入力してください。',
         required: true
       });
       salesQuestions.push({
         id: 'Q2-7-3',
-        text: `${latestFiscalYear + 1}年${fiscalMonth}期（次期）の年間売上見込みを教えてください`,
+        text: `${latestFiscalYear}年度（${latestFiscalYear + 1}年${fiscalMonth}期決算予定）の会社全体の年間売上見込みを教えてください`,
         type: 'number',
         placeholder: '例：1200',
-        helpText: '万円単位で見込み額を入力してください',
+        helpText: '万円単位で見込み額を入力してください。',
+        required: true
+      });
+      salesQuestions.push({
+        id: 'Q2-7-3-profit',
+        text: `${latestFiscalYear}年度（${latestFiscalYear + 1}年${fiscalMonth}期決算予定）の経常利益見込みを教えてください`,
+        type: 'number',
+        placeholder: '例：100',
+        helpText: '万円単位で見込み額を入力してください。',
         required: true
       });
     } else if (fiscalYearsCount === 1) {
-      // 1期のみ → 当期実績 + 2期分の見込み
+      // 1期終了 → 前期実績・利益 + 当期見込み + 次期見込み
       salesQuestions.push({
         id: 'Q2-7-1',
-        text: `${latestFiscalYear}年${fiscalMonth}期（当期）の年間売上を教えてください`,
+        text: `${latestFiscalYear - 1}年度（${latestFiscalYear}年${fiscalMonth}期決算）の会社全体の年間売上を教えてください`,
         type: 'number',
         placeholder: '例：600',
-        helpText: '万円単位で入力してください。確定していない場合は見込み額を入力してください',
+        helpText: '万円単位で入力してください。決算書・確定申告書に記載されている会社全体の売上高を入力してください。',
+        required: true
+      });
+      salesQuestions.push({
+        id: 'Q2-7-1-profit',
+        text: `${latestFiscalYear - 1}年度（${latestFiscalYear}年${fiscalMonth}期決算）の経常利益を教えてください`,
+        type: 'number',
+        placeholder: '例：50（黒字の場合）、-30（赤字の場合）',
+        helpText: '万円単位で入力してください。決算書・確定申告書に記載されている経常利益を入力してください。',
         required: true
       });
       salesQuestions.push({
         id: 'Q2-7-2',
-        text: `${latestFiscalYear + 1}年${fiscalMonth}期（次期）の年間売上見込みを教えてください`,
+        text: `${latestFiscalYear}年度（${latestFiscalYear + 1}年${fiscalMonth}期決算予定）の会社全体の年間売上見込みを教えてください`,
         type: 'number',
         placeholder: '例：800',
-        helpText: '万円単位で見込み額を入力してください',
+        helpText: '万円単位で見込み額を入力してください。',
+        required: true
+      });
+      salesQuestions.push({
+        id: 'Q2-7-2-profit',
+        text: `${latestFiscalYear}年度（${latestFiscalYear + 1}年${fiscalMonth}期決算予定）の経常利益見込みを教えてください`,
+        type: 'number',
+        placeholder: '例：70',
+        helpText: '万円単位で見込み額を入力してください。',
         required: true
       });
       salesQuestions.push({
         id: 'Q2-7-3',
-        text: `${latestFiscalYear + 2}年${fiscalMonth}期（次々期）の年間売上見込みを教えてください`,
+        text: `${latestFiscalYear + 1}年度（${latestFiscalYear + 2}年${fiscalMonth}期決算予定）の会社全体の年間売上見込みを教えてください`,
         type: 'number',
         placeholder: '例：1000',
-        helpText: '万円単位で見込み額を入力してください',
+        helpText: '万円単位で見込み額を入力してください。',
+        required: true
+      });
+      salesQuestions.push({
+        id: 'Q2-7-3-profit',
+        text: `${latestFiscalYear + 1}年度（${latestFiscalYear + 2}年${fiscalMonth}期決算予定）の経常利益見込みを教えてください`,
+        type: 'number',
+        placeholder: '例：90',
+        helpText: '万円単位で見込み額を入力してください。',
         required: true
       });
     } else {
       // 開業前または開業間もない → 見込みのみ3期分
+      const firstYear = latestFiscalYear >= currentYear ? latestFiscalYear : currentYear;
       salesQuestions.push({
         id: 'Q2-7-1',
-        text: `初年度の年間売上見込みを教えてください`,
+        text: `${firstYear - 1}年度（${firstYear}年${fiscalMonth}期決算予定）の会社全体の年間売上見込みを教えてください`,
         type: 'number',
         placeholder: '例：500',
-        helpText: '万円単位で見込み額を入力してください',
+        helpText: '万円単位で見込み額を入力してください。初年度の売上見込みを入力してください。',
+        required: true
+      });
+      salesQuestions.push({
+        id: 'Q2-7-1-profit',
+        text: `${firstYear - 1}年度（${firstYear}年${fiscalMonth}期決算予定）の経常利益見込みを教えてください`,
+        type: 'number',
+        placeholder: '例：40',
+        helpText: '万円単位で見込み額を入力してください。',
         required: true
       });
       salesQuestions.push({
         id: 'Q2-7-2',
-        text: `2年目の年間売上見込みを教えてください`,
+        text: `${firstYear}年度（${firstYear + 1}年${fiscalMonth}期決算予定）の会社全体の年間売上見込みを教えてください`,
         type: 'number',
         placeholder: '例：700',
-        helpText: '万円単位で見込み額を入力してください',
+        helpText: '万円単位で見込み額を入力してください。2年目の売上見込みを入力してください。',
+        required: true
+      });
+      salesQuestions.push({
+        id: 'Q2-7-2-profit',
+        text: `${firstYear}年度（${firstYear + 1}年${fiscalMonth}期決算予定）の経常利益見込みを教えてください`,
+        type: 'number',
+        placeholder: '例：60',
+        helpText: '万円単位で見込み額を入力してください。',
         required: true
       });
       salesQuestions.push({
         id: 'Q2-7-3',
-        text: `3年目の年間売上見込みを教えてください`,
+        text: `${firstYear + 1}年度（${firstYear + 2}年${fiscalMonth}期決算予定）の会社全体の年間売上見込みを教えてください`,
         type: 'number',
         placeholder: '例：900',
-        helpText: '万円単位で見込み額を入力してください',
+        helpText: '万円単位で見込み額を入力してください。3年目の売上見込みを入力してください。',
+        required: true
+      });
+      salesQuestions.push({
+        id: 'Q2-7-3-profit',
+        text: `${firstYear + 1}年度（${firstYear + 2}年${fiscalMonth}期決算予定）の経常利益見込みを教えてください`,
+        type: 'number',
+        placeholder: '例：80',
+        helpText: '万円単位で見込み額を入力してください。',
         required: true
       });
     }
@@ -711,7 +1155,17 @@ const ChatContainer = () => {
           id: 'Q1-1',
           text: 'あなたの事業は次のどれに該当しますか？',
           type: 'single_select',
-          options: ['飲食店（レストラン・カフェ・居酒屋等）'],
+          options: [
+            '飲食店（レストラン・カフェ・居酒屋等）',
+            '小売業（服飾・雑貨・食品販売等）',
+            '美容・理容業（美容室・理容室・ネイルサロン等）',
+            '生活関連サービス（クリーニング・修理・整体・マッサージ等）',
+            '宿泊業（ホテル・旅館・民泊等）',
+            '娯楽業（カラオケ・ボウリング・スポーツ施設等）',
+            '教育・学習支援業（学習塾・音楽教室・スポーツ教室等）',
+            '医療・福祉（整骨院・鍼灸院・デイサービス等）',
+            'その他サービス業'
+          ],
           required: true
         },
         {
@@ -729,7 +1183,7 @@ const ChatContainer = () => {
         },
         {
           id: 'Q1-3',
-          text: '具体的にどんな取組を検討していますか？（複数選択可）',
+          text: '今回申請する事業で、具体的にどんな取組を検討していますか？（複数選択可）',
           type: 'multi_select',
           options: [
             'ホームページ・ECサイト制作',
@@ -741,6 +1195,7 @@ const ChatContainer = () => {
             '厨房機器・設備導入',
             'その他'
           ],
+          helpText: '複数事業を展開している場合は、今回補助金を申請する事業での取組を選択してください。',
           required: true
         }
       ],
@@ -766,11 +1221,20 @@ const ChatContainer = () => {
           required: true
         },
         {
+          id: 'Q2-2-1',
+          text: '現在行っている事業内容を教えてください（複数事業を行っている場合はすべて記載）',
+          type: 'textarea',
+          maxLength: 200,
+          placeholder: '例：飲食店経営、ケータリングサービス\n例：建設業、宿泊業（グランピング施設）',
+          helpText: '複数の事業を展開している場合は、すべての事業を記載してください。今回の申請は、その中の一つの事業に対して行います。',
+          required: true
+        },
+        {
           id: 'Q2-3',
-          text: '開業年月を教えてください',
+          text: '今回申請する事業の開業年月を教えてください',
           type: 'date',
           format: 'YYYY-MM',
-          helpText: '個人事業主の方は、開業届を提出した年月、または実際に営業を開始した年月を入力してください',
+          helpText: '【重要】今回補助金を申請する事業を開始した年月を入力してください。例：会社は2016年設立（建設業）で、2023年にグランピング施設を開始した場合、グランピング施設で申請するなら「2023年〇月」と入力します。単一事業のみの場合は、会社設立年月または開業届提出年月を入力してください。',
           required: true
         },
         {
@@ -782,16 +1246,16 @@ const ChatContainer = () => {
         },
         {
           id: 'Q2-5',
-          text: 'お店を始めた時の想いや、大切にしている理念を教えてください',
+          text: '事業を始めた時の想いや、大切にしている理念を教えてください',
           type: 'textarea',
           maxLength: 300,
           placeholder: '簡潔に記入してください（AIが詳しく補完します）',
           examples: [
-            '地元食材で家族連れが楽しめる店を作りたかった',
-            '本場フランスの味を日本の皆様に提供したい',
-            '地域の人が毎日通える気軽なお店を目指しました'
+            '地元の方が気軽に通える場所を作りたかった',
+            '高品質なサービスを手頃な価格で提供したい',
+            '地域に貢献できる事業を目指しています'
           ],
-          helpText: 'お店を開業した理由、こだわりなどを簡潔に記入してください。AIが申請書に適した文章に補完します',
+          helpText: '開業した理由、こだわり、大切にしている価値観などを簡潔に記入してください。AIが申請書に適した文章に補完します',
           required: true
         },
         {
@@ -805,23 +1269,14 @@ const ChatContainer = () => {
             '3人',
             '4人',
             '5人',
-            '6人以上（対象外の可能性があります）'
+            '6～10人',
+            '11～20人',
+            '21人以上'
           ],
-          helpText: '【常時雇用従業員とは】フルタイム勤務の正社員。経営者本人、同居家族、パート・アルバイトは含まない。飲食業は5人以下が対象です。',
+          helpText: getEmployeeHelpText(),
           required: true
         },
-        ...generateSalesQuestions(), // 動的に生成された売上質問を挿入
-        {
-          id: 'Q2-8',
-          text: '直近期の経常利益の状況を選択してください',
-          type: 'single_select',
-          options: [
-            '黒字（補助率2/3）',
-            '赤字またはゼロ（補助率3/4の可能性）'
-          ],
-          helpText: '赤字の場合、賃金引上げ特例適用時に補助率が3/4に向上します',
-          required: true
-        },
+        ...generateSalesQuestions(), // 動的に生成された売上質問を挿入（売上・経常利益セット）
         {
           id: 'Q2-9',
           text: '財務推移について教えてください',
@@ -833,52 +1288,112 @@ const ChatContainer = () => {
             'まだ判断できない（開業間もない）'
           ],
           required: true
+        },
+        {
+          id: 'Q2-10',
+          text: '店舗や商品の写真はお持ちですか？',
+          type: 'single_select',
+          options: [
+            'はい、店舗外観・内観・商品写真がある',
+            'はい、店舗写真のみある',
+            'はい、商品写真のみある',
+            'いいえ、写真はない'
+          ],
+          helpText: '申請書には視覚資料（写真・イラスト）があると審査で有利になります。申請書生成時に【ここに画像を挿入】という提案を記載します。',
+          required: true
+        },
+        {
+          id: 'Q2-11',
+          text: '平均的な客単価を教えてください',
+          type: 'number',
+          placeholder: '例：3000',
+          helpText: '円単位で入力してください。おおよその平均額で構いません。',
+          required: true
+        },
+        {
+          id: 'Q2-12',
+          text: '1日あたりの平均来客数（または利用者数）を教えてください',
+          type: 'text',
+          placeholder: '例：平日20名、休日50名',
+          helpText: '平日と休日で分けて記載してください。オンライン事業の場合は月間の注文件数などを記載。',
+          required: true
+        },
+        {
+          id: 'Q2-13',
+          text: '主力商品・サービスの営業利益率（おおよそ）を教えてください',
+          type: 'text',
+          placeholder: '例：コーヒー豆 約6%、贈答用セット 約4%',
+          helpText: '売上が多い商品や利益率が高い商品について、わかる範囲で記載してください。不明な場合は「不明」と記載。',
+          required: false
         }
       ],
       3: [
         {
           id: 'Q3-1',
-          text: 'ターゲット顧客層はどなたですか？（複数選択可）',
+          text: 'ターゲット顧客の年代層を教えてください（複数選択可）',
           type: 'multi_select',
           options: [
-            '20代の若年層',
-            '30-40代のファミリー層',
-            '50-60代のシニア層',
-            'ビジネスパーソン',
-            '観光客',
-            '地域住民',
-            '美食家・グルメ愛好家',
-            'その他'
+            '10代',
+            '20代',
+            '30代',
+            '40代',
+            '50代',
+            '60代',
+            '70代以上',
+            '年齢は問わない'
           ],
           required: true
         },
         {
-          id: 'Q3-2',
-          text: 'お客様が来店する主な理由は何ですか？（複数選択可）',
+          id: 'Q3-1-1',
+          text: 'ターゲット顧客の属性を教えてください（複数選択可）',
           type: 'multi_select',
           options: [
-            '日常的な食事',
-            '記念日・特別な日',
-            '接待・商談',
-            'デート',
-            '友人・家族との集まり',
-            'テイクアウト・デリバリー',
+            'ファミリー層（家族連れ）',
+            'カップル・夫婦',
+            '友人同士',
+            '単身者',
+            'ビジネスパーソン',
+            '観光客・旅行者',
+            '地域住民',
+            '学生',
+            '主婦・主夫',
+            'シニア世代',
+            'その他'
+          ],
+          helpText: '年代とは別に、顧客の属性や利用シーンを選択してください',
+          required: true
+        },
+        {
+          id: 'Q3-2',
+          text: 'お客様が利用する主な目的は何ですか？（複数選択可）',
+          type: 'multi_select',
+          options: [
+            '日常的な利用',
+            '特別な日・記念日',
+            'ビジネス利用',
+            '観光・レジャー',
+            '自分へのご褒美',
+            '友人・家族との時間',
+            '健康・美容目的',
+            '学習・スキルアップ',
             'その他'
           ],
           required: true
         },
         {
           id: 'Q3-3',
-          text: '現在、お客様はどのようにお店を知りますか？（複数選択可）',
+          text: '現在、お客様はどのようにあなたの事業を知りますか？（複数選択可）',
           type: 'multi_select',
           options: [
-            '知人の紹介',
-            '食べログ・Googleマップ',
+            '知人の紹介・口コミ',
+            'Googleマップ・検索',
             'Instagram・SNS',
             '通りがかり',
             'チラシ・ポスター',
-            '地域情報誌',
+            '地域情報誌・フリーペーパー',
             'ホームページ',
+            '予約サイト・ポータルサイト',
             'その他'
           ],
           helpText: '現在の主な認知経路を選択してください',
@@ -901,16 +1416,16 @@ const ChatContainer = () => {
         },
         {
           id: 'Q3-5',
-          text: '商圏内の主な競合店舗の状況を教えてください',
+          text: '商圏内の主な競合事業者の状況を教えてください',
           type: 'textarea',
           maxLength: 300,
           placeholder: '簡潔に記入してください（AIが詳しく補完します）',
           examples: [
-            '周辺に同業態3店舗。価格帯はうちより低め',
+            '周辺に同業態3店舗。価格帯は当店より低め',
             '競合は多いが高級路線は少ない',
-            '駅前に大手チェーン2店舗あり'
+            '駅前に大手チェーンあり。個人店は当店のみ'
           ],
-          helpText: '競合の数、価格帯、特徴などを簡潔に記入してください',
+          helpText: '競合の数、価格帯、サービス内容の違いなどを簡潔に記入してください',
           required: true
         },
         {
@@ -920,13 +1435,12 @@ const ChatContainer = () => {
           options: [
             'オンライン予約の導入',
             'SNSでの情報発信',
-            'テイクアウト・デリバリー',
-            'アレルギー対応',
-            'ベジタリアン・ヴィーガン対応',
-            '個室・半個室',
-            '駐車場',
+            'キャッシュレス決済',
             '営業時間の延長',
-            'ランチ営業',
+            '駐車場の確保',
+            '新しいサービス・メニューの追加',
+            '店舗の雰囲気改善',
+            'スタッフ対応の向上',
             'その他'
           ],
           required: true
@@ -940,170 +1454,64 @@ const ChatContainer = () => {
             'ホームページのみあり',
             'SNSのみ運用中',
             'どちらも未実施',
-            '食べログ・Googleマップのみ'
+            'GoogleマップやSNSのビジネスアカウントのみ'
           ],
+          required: true
+        },
+        {
+          id: 'Q3-8',
+          text: 'お客様の居住地域はどちらが多いですか？（複数選択可）',
+          type: 'multi_select',
+          options: [
+            '店舗と同じ市区町村',
+            '隣接する市区町村',
+            '同じ都道府県内',
+            '他の都道府県',
+            '海外',
+            '把握していない'
+          ],
+          helpText: '記載例では地域別の顧客割合を分析しています。おおよその傾向で構いません。',
+          required: true
+        },
+        {
+          id: 'Q3-9',
+          text: 'あなたの事業の商圏（お客様が来る範囲）はどのくらいですか？',
+          type: 'single_select',
+          options: [
+            '徒歩圏内（半径1km程度）',
+            '自転車圏内（半径3km程度）',
+            '車で15分圏内（半径5-10km）',
+            '車で30分圏内（半径10-20km）',
+            '県内全域',
+            '全国（オンライン中心）',
+            '把握していない'
+          ],
+          helpText: '主なお客様がどのくらいの範囲から来店・利用されるかを選択してください',
           required: true
         }
       ],
       4: [
-        {
-          id: 'Q4-1',
-          text: 'あなたのお店の最大の強みは何ですか？（複数選択可）',
-          type: 'multi_select',
-          options: [
-            '料理の味・品質',
-            'シェフの技術・経歴',
-            '厳選した食材へのこだわり',
-            '独自のメニュー・レシピ',
-            '接客・ホスピタリティ',
-            '店舗の雰囲気・内装',
-            '立地・アクセス',
-            '価格・コストパフォーマンス',
-            'その他'
-          ],
-          required: true
-        },
-        {
-          id: 'Q4-2',
-          text: 'シェフやスタッフの経歴・特徴を教えてください',
-          type: 'textarea',
-          maxLength: 300,
-          placeholder: '簡潔に記入してください（AIが詳しく補完します）',
-          examples: [
-            'シェフはフランスで3年修業しました',
-            '都内有名店で10年経験、調理師免許あり',
-            'イタリアンレストランで5年働いていました'
-          ],
-          helpText: '資格、修業先、受賞歴、専門分野などを簡潔に記入してください',
-          required: true
-        },
-        {
-          id: 'Q4-3',
-          text: '食材へのこだわりについて教えてください',
-          type: 'textarea',
-          maxLength: 300,
-          placeholder: '例：築地市場から毎朝仕入れる鮮魚、地元契約農家の無農薬野菜を使用しています。',
-          helpText: '仕入れ先、品質基準、産地など具体的に記入してください',
-          required: true
-        },
-        {
-          id: 'Q4-4',
-          text: '接客・サービスで工夫していることは何ですか？',
-          type: 'textarea',
-          maxLength: 300,
-          placeholder: '例：お客様一人ひとりの好みを記録し、2回目以降の来店時に前回の内容を踏まえた提案を行っています。',
-          helpText: '具体的な取組や独自のサービスを記入してください',
-          required: true
-        },
-        {
-          id: 'Q4-5',
-          text: 'お客様から特に評価されているポイントは何ですか？',
-          type: 'textarea',
-          maxLength: 200,
-          placeholder: '例：記念日のサプライズ演出、料理とワインのペアリング提案など',
-          required: true
-        },
-        {
-          id: 'Q4-6',
-          text: '現在抱えている経営課題は何ですか？（複数選択可）',
-          type: 'multi_select',
-          options: [
-            '新規顧客の獲得',
-            'リピーター率の向上',
-            '認知度の向上',
-            '売上の増加',
-            '利益率の改善',
-            '人材確保・育成',
-            '業務効率化',
-            'コスト削減',
-            'その他'
-          ],
-          required: true
-        },
-        {
-          id: 'Q4-7',
-          text: '新規顧客獲得の課題について詳しく教えてください',
-          type: 'textarea',
-          maxLength: 200,
-          placeholder: '例：口コミ中心で新規顧客が限定的。Web予約システムがなく、営業時間外の予約機会を逃している。',
-          required: true
-        },
-        {
-          id: 'Q4-8',
-          text: '直近1年間の顧客数の推移はどうですか？',
-          type: 'single_select',
-          options: [
-            '大幅に増加（+20%以上）',
-            '増加傾向（+10-20%）',
-            '微増（+10%未満）',
-            '横ばい',
-            '減少傾向',
-            '把握していない'
-          ],
-          required: true
-        },
-        {
-          id: 'Q4-9',
-          text: '現在の予約方法の内訳を教えてください',
-          type: 'single_select',
-          options: [
-            '電話予約のみ',
-            '電話予約80%以上',
-            '電話とWeb予約が半々',
-            'Web予約80%以上',
-            'その他'
-          ],
-          helpText: 'おおよその割合で構いません',
-          required: true
-        },
-        {
-          id: 'Q4-10',
-          text: 'スタッフの業務負担で課題に感じることは？（複数選択可）',
-          type: 'multi_select',
-          options: [
-            '電話対応に時間がかかる',
-            '予約管理が煩雑',
-            '顧客情報の管理',
-            '在庫管理',
-            'シフト管理',
-            '会計処理',
-            '特になし',
-            'その他'
-          ],
-          required: true
-        },
-        {
-          id: 'Q4-11',
-          text: '顧客情報はどのように管理していますか？',
-          type: 'single_select',
-          options: [
-            '専用システムで管理',
-            'Excelで管理',
-            '紙の台帳で管理',
-            '管理していない',
-            'その他'
-          ],
-          required: true
-        }
+        // Step 4はAI自律質問に完全移行
+        // 業種ごとの詳細な質問はAIが動的に生成
       ],
       5: [
         {
           id: 'Q5-1',
-          text: '今回の補助金で最も実現したいことは何ですか？',
+          text: '【販路開拓の具体的な計画】これまでの分析を踏まえ、今回の補助金で取り組む販路開拓の内容を教えてください',
           type: 'textarea',
           maxLength: 300,
           placeholder: '簡潔に記入してください（AIが詳しく補完します）',
           examples: [
-            'Web予約とSNSで新規顧客を増やしたい',
-            'ホームページを作って認知度を上げたい',
-            'デジタル広告で売上を25%増やしたい'
+            'Web予約システムを導入し、24時間予約可能にすることで新規顧客を月30組増やす',
+            'InstagramとGoogle広告を組み合わせて認知度を高め、来店客数を20%増加させる',
+            'ホームページと看板リニューアルで店舗イメージを一新し、客単価を15%向上させる'
           ],
-          helpText: '具体的な目標を簡潔に記入してください',
+          helpText: '課題分析の結果を踏まえ、具体的な取組内容と目標を記入してください',
           required: true
         },
         {
           id: 'Q5-2',
-          text: '具体的にどんな取組を実施しますか？（複数選択可）',
+          text: '【実施する取組の選択】上記の計画を実現するために、実際に実施する取組を選択してください（複数選択可）',
           type: 'multi_select',
           options: [
             'ホームページ制作・リニューアル',
@@ -1145,11 +1553,22 @@ const ChatContainer = () => {
         },
         {
           id: 'Q5-6',
-          text: '予想される経費の内訳を教えてください',
+          text: '予想される経費の内訳を教えてください（経費区分と金額）',
           type: 'textarea',
-          maxLength: 500,
-          placeholder: '例：\nWebサイト制作：50万円\n予約システム導入：30万円\nSNS広告：月5万円×12ヶ月',
-          helpText: '概算で構いません',
+          maxLength: 800,
+          placeholder: '例：\n②広報費：チラシ制作 30万円\n③ウェブサイト関連費：HP制作 20万円\n①機械装置等費：厨房機器 50万円',
+          helpText: '【重要】経費区分を明記してください。①機械装置等費 ②広報費 ③ウェブサイト関連費 ④展示会等出展費 ⑤旅費 ⑥開発費 ⑦資料購入費 ⑧雑役務費 ⑨借料 ⑩設備処分費 ⑪委託・外注費。ウェブサイト関連費は総額の1/4以内（最大50万円）を守ってください。',
+          required: true
+        },
+        {
+          id: 'Q5-6-1',
+          text: 'ウェブサイト関連費の制約を確認してください',
+          type: 'single_select',
+          options: [
+            '確認しました（ウェブサイト関連費は総額の1/4以内、最大50万円、単独申請ではない）',
+            'ウェブサイト関連費は含まれていません'
+          ],
+          helpText: '【申請の重要ルール】ウェブサイト関連費（HP制作、ECサイト構築等）は、(1)総額の1/4以内 (2)最大50万円 (3)単独申請不可（他の経費と組み合わせ必須）。このルールを守らないと申請書全体が不備扱いになります。',
           required: true
         },
         {
@@ -1226,6 +1645,15 @@ const ChatContainer = () => {
           maxLength: 200,
           placeholder: '例：Web予約率60%達成、SNSフォロワー5,000人、年間売上4,000万円達成など',
           required: true
+        },
+        {
+          id: 'Q5-15',
+          text: '【業務効率化（任意）】今回の取組で業務効率化も実現できますか？',
+          type: 'textarea',
+          maxLength: 300,
+          placeholder: '例：Web予約システムで電話対応時間が1日2時間削減され、その時間でSNS発信や新メニュー開発に注力できる',
+          helpText: '業務効率化を記載する場合は、削減された時間やコストを「販路開拓（新規顧客獲得・売上向上）」にどう活用するかを必ず記載してください。記載は任意です。',
+          required: false
         }
       ]
     };
@@ -1240,8 +1668,32 @@ const ChatContainer = () => {
     return questions;
   };
 
+  // Google Mapsから推測された回答を取得
+  const getSuggestedAnswer = (questionId) => {
+    // Q1-3の場合、Google Mapsから商品・サービスを推測
+    if (questionId === 'Q1-3' && answers['Q1-0']) {
+      const placeInfo = answers['Q1-0'];
+      if (placeInfo.types && placeInfo.types.length > 0) {
+        const serviceHint = inferServicesFromPlaceTypes(placeInfo.types, placeInfo.name);
+        return serviceHint || null;
+      }
+    }
+    return null;
+  };
+
   // 前の質問の回答を取得
   const getPreviousAnswer = (currentQuestionId) => {
+    // Step 1は対話型フローを使用
+    if (currentStep === 1) {
+      // Q1-0-confirmの場合、Q1-0のGoogle Maps情報を返す
+      if (currentQuestionId === 'Q1-0-confirm') {
+        return answers['Q1-0'];
+      }
+      // その他のStep 1質問の場合も依存関係から前の質問を取得
+      return null; // 現時点では不要
+    }
+
+    // Step 2以降は従来のフロー
     const questions = getStepQuestions(currentStep);
     const currentIndex = questions.findIndex(q => q.id === currentQuestionId);
 
@@ -1282,6 +1734,14 @@ const ChatContainer = () => {
 
       <ProgressBar currentStep={currentStep} totalSteps={5} />
 
+      {/* 完成度インジケーター */}
+      {completenessScore > 0 && (
+        <CompletenessIndicator
+          completenessData={calculateOverallCompleteness(answers)}
+          onClick={() => setShowCompletenessDetails(!showCompletenessDetails)}
+        />
+      )}
+
       <div className="chat-messages">
         {messages.map((message) => (
           <MessageBubble
@@ -1320,9 +1780,11 @@ const ChatContainer = () => {
           onAnswer={handleAnswer}
           isLoading={isLoading}
           previousAnswer={getPreviousAnswer(currentQuestion.id)}
+          suggestedAnswer={getSuggestedAnswer(currentQuestion.id)}
           aiDraft={aiDraft}
           onGoBack={handleGoBack}
           canGoBack={Object.keys(answers).length > 0}
+          allAnswers={answers}
         />
       )}
 
@@ -1335,6 +1797,52 @@ const ChatContainer = () => {
       )}
     </div>
   );
+};
+
+/**
+ * Google Maps typesから商品・サービスを推測
+ */
+const inferServicesFromPlaceTypes = (types, name) => {
+  // Google Maps types mapping
+  const typeMapping = {
+    'restaurant': 'イタリア料理・ワイン販売',
+    'bar': 'バー・ワイン販売',
+    'cafe': 'カフェ・軽食',
+    'bakery': 'パン・焼き菓子販売',
+    'meal_takeaway': 'テイクアウト料理',
+    'clothing_store': '衣類販売',
+    'shoe_store': '靴販売',
+    'jewelry_store': 'ジュエリー販売',
+    'beauty_salon': '美容・ヘアカット',
+    'hair_care': 'ヘアケア・美容',
+    'spa': 'エステ・スパ',
+    'gym': 'フィットネス・トレーニング',
+    'hardware_store': '工具・建築資材販売',
+    'florist': '花・フラワーアレンジメント'
+  };
+
+  // typesから最初にマッチしたものを返す
+  for (const type of types) {
+    if (typeMapping[type]) {
+      return typeMapping[type];
+    }
+  }
+
+  // 店名からヒントを得る（例: "Crear Bacchus" → イタリア料理・ワイン）
+  if (name) {
+    const nameLower = name.toLowerCase();
+    if (nameLower.includes('wine') || nameLower.includes('bacchus')) {
+      return 'イタリア料理・ワイン販売';
+    }
+    if (nameLower.includes('cafe') || nameLower.includes('coffee')) {
+      return 'カフェ・コーヒー';
+    }
+    if (nameLower.includes('salon')) {
+      return '美容・ヘアカット';
+    }
+  }
+
+  return null;
 };
 
 export default ChatContainer;

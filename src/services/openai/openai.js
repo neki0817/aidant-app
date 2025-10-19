@@ -55,6 +55,13 @@ export const enhanceAnswer = async (questionId, questionText, userAnswer, contex
       maxTokens = 300;
     }
 
+    // 口コミ情報から特徴を抽出
+    let reviewInsights = '';
+    if (context.reviews && context.reviews.length > 0) {
+      const reviewTexts = context.reviews.slice(0, 3).map(r => r.text).join('\n');
+      reviewInsights = `\n【Google Maps口コミ（参考）】\n${reviewTexts}\n※口コミから読み取れる特徴を活用してください`;
+    }
+
     const prompt = `あなたは小規模事業者持続化補助金申請のサポートAIです。
 ユーザーは申請書作成の経験がなく、短い回答しかできません。
 ユーザーの簡潔な回答を、申請書に適した詳細で説得力のある文章に補完してください。
@@ -68,15 +75,17 @@ ${userAnswer}
 【店舗情報（参考）】
 ${context.storeName ? `店舗名: ${context.storeName}` : ''}
 ${context.storeAddress ? `住所: ${context.storeAddress}` : ''}
-${context.philosophy ? `経営理念: ${context.philosophy}` : ''}
+${context.businessType ? `業種: ${context.businessType}` : ''}
+${context.rating ? `評価: ${context.rating}/5.0 (${context.userRatingsTotal}件)` : ''}
+${context.philosophy ? `経営理念: ${context.philosophy}` : ''}${reviewInsights}
 
 【補完のポイント】
 1. ユーザーの意図を正確に汲み取る
-2. 具体的で説得力のある表現にする
+2. 店舗情報や口コミから読み取れる実際の特徴を活用する（重要）
 3. ${targetLength}に拡張する（重要：この文字数を守ること）
 4. 申請書として自然な文章にする
 5. 誇張せず、実現可能な内容にする
-6. ユーザーが書いていない新しい情報は追加しない
+6. 根拠のない創作をしない（口コミや店舗情報に基づいた内容のみ）
 7. 簡潔さを保ちながら、必要な情報を盛り込む
 
 補完された文章のみを出力してください。説明や前置きは不要です。`;
