@@ -8,6 +8,9 @@ import { runAutonomousLoop, checkProgressAndSuggestNextFocus, runFinalCheck, res
 import { calculateOverallCompleteness, generateProgressSummary } from '../../services/ai/completionTracker';
 import { getNextStep1Question, isStep1Complete, getAutoAnswerFromGoogleMaps } from '../../services/ai/conversationalQuestionsStep1';
 import { isUserQuestion, answerUserQuestion } from '../../services/ai/conversationalFlow';
+import { getFirstStep2Question, getNextStep2Question, isStep2Complete } from '../../services/ai/conversationalQuestionsStep2';
+import { executeAutoAnalysis } from '../../services/ai/autoAnalysisHandler';
+import { executeFollowupAnalysis } from '../../services/ai/aiFollowupHandler';
 import MessageBubble from './MessageBubble';
 import QuestionInput from './QuestionInput';
 import ProgressBar from './ProgressBar';
@@ -174,7 +177,7 @@ const ChatContainer = () => {
     }
 
     // Step 1の場合、Google Mapsから自動回答できるかチェック
-    if (currentStep === 1) {
+    if (currentStep === 1 || currentStep === 2) {
       const autoAnswer = getAutoAnswerFromGoogleMaps(answers);
       if (autoAnswer) {
         console.log('[Auto Answer] Google Mapsから自動回答:', autoAnswer);
@@ -192,6 +195,53 @@ const ChatContainer = () => {
     // 質問が変わった場合のみ更新
     if (question && question.id !== currentQuestion?.id) {
       setCurrentQuestion(question);
+      // 自動分析タイプの質問の場合、即座に実行
+      if (question.type === 'auto_analyze_competitors' || question.type === 'auto_analyze_reviews' || question.type === 'ai_followup_analysis') {
+        console.log('[Auto Analysis] Detected auto analysis type:', question.type);
+
+        // 非同期で自動分析を実行
+        (async () => {
+          try {
+            setIsLoading(true);
+
+            let analysisResult;
+
+            // タイプに応じた処理
+            if (question.type === 'ai_followup_analysis') {
+              // AI補完分析
+              analysisResult = await executeFollowupAnalysis(answers);
+            } else {
+              // 競合・口コミ分析
+              analysisResult = await executeAutoAnalysis(question.id, question.type, answers);
+            }
+
+            console.log('[Auto Analysis] Result:', analysisResult);
+
+            // 結果を保存
+            updateAnswer(question.id, analysisResult);
+
+            setIsLoading(false);
+
+            // 次の質問に自動遷移
+            // useEffectが再度トリガーされて次の質問が表示される
+          } catch (error) {
+            console.error('[Auto Analysis] Error:', error);
+            addAIMessage(`分析中にエラーが発生しました: ${error.message}\n\n手動で入力してください。`);
+            setIsLoading(false);
+
+            // エラー時は手動入力にフォールバック
+            if (question.type === 'auto_analyze_competitors') {
+              updateAnswer(question.id, { competitors: [], error: error.message });
+            } else if (question.type === 'auto_analyze_reviews') {
+              updateAnswer(question.id, { keywords: [], strengthsText: '', error: error.message });
+            } else if (question.type === 'ai_followup_analysis') {
+              updateAnswer(question.id, { questions: [], error: error.message });
+            }
+          }
+        })();
+
+        return; // これ以上の処理をスキップ
+      }
 
       // 最初の質問以外はチャットに表示
       if (Object.keys(answers).length > 0) {
@@ -215,10 +265,23 @@ const ChatContainer = () => {
           addAIMessage(`💡 ${question.placeholder}`);
         }
       }
-    } else if (!question && currentQuestion) {
+    } else if (!question && Object.keys(answers).length > 0) {
       // 質問がなくなった（ステップ完了）
-      setCurrentQuestion(null);
-      handleStepComplete();
+      // Step 1完了の場合
+      if (currentStep === 1 && isStep1Complete(answers)) {
+        setCurrentQuestion(null);
+        handleStepComplete();
+      }
+      // Step 2完了の場合
+      else if (currentStep === 2 && isStep2Complete(answers)) {
+        setCurrentQuestion(null);
+        handleStepComplete();
+      }
+      // その他のステップ
+      else if (currentQuestion) {
+        setCurrentQuestion(null);
+        handleStepComplete();
+      }
     }
   }, [currentStep, answers]);
 
@@ -520,8 +583,8 @@ const ChatContainer = () => {
 
       // 【完全自律AI】回答保存後、自律エージェントを起動
       // ただし、Step 1は対話型フローを使用するため、自律エージェントはスキップ
-      if (currentStep === 1) {
-        console.log('[Conversational Flow] Step 1 - Using conversational flow (autonomous AI disabled)');
+      if (currentStep === 1 || currentStep === 2) {
+        console.log('[Conversational Flow] Step 1 & 2 - Using conversational flow (autonomous AI disabled)');
       } else if (autonomousMode && currentQuestion) {
         console.log('[Autonomous AI] Analyzing answer with autonomous agent...');
 
@@ -798,7 +861,100 @@ const ChatContainer = () => {
       return nextQuestion;
     }
 
-    // Step 2以降は従来のフロー
+    // Step 2も対話型フローを使用
+    if (currentStep === 2) {
+      // 最初の質問がまだ回答されていない場合
+      if (!answers['Q2-1']) {
+        const firstQuestion = getFirstStep2Question();
+        console.log('[Conversational] Step 2 first question:', firstQuestion?.id);
+        return {
+          id: firstQuestion.id,
+          text: typeof firstQuestion.question === 'function' ? firstQuestion.question(answers) : firstQuestion.question,
+          type: firstQuestion.type,
+          options: firstQuestion.options,
+          validation: firstQuestion.validation,
+          examples: firstQuestion.examples,
+          inputHint: firstQuestion.inputHint,
+          helpText: firstQuestion.helpText
+        };
+      }
+
+      // 最後に回答した質問を探す
+      const allAnsweredQ2 = Object.keys(answers)
+        .filter(qId => qId.startsWith('Q2-'))
+        .sort((a, b) => {
+          // Q2-1, Q2-2, Q2-3-multi などを数値部分でソート
+          const parseQId = (qId) => {
+            const match = qId.match(/Q2-(\d+)(?:-(.+))?/);
+            if (!match) return [0, ''];
+            return [parseInt(match[1], 10), match[2] || ''];
+          };
+          
+          const [aNum, aSuffix] = parseQId(a);
+          const [bNum, bSuffix] = parseQId(b);
+          
+          if (aNum !== bNum) {
+            return aNum - bNum;
+          }
+          
+          // 同じ番号の場合はサフィックスで比較
+          return aSuffix.localeCompare(bSuffix);
+        });
+      
+      console.log('[Step 2] All answered Q2 questions (sorted):', allAnsweredQ2);
+      
+      if (allAnsweredQ2.length === 0) {
+        const firstQuestion = getFirstStep2Question();
+        return {
+          id: firstQuestion.id,
+          text: typeof firstQuestion.question === 'function' ? firstQuestion.question(answers) : firstQuestion.question,
+          type: firstQuestion.type,
+          options: firstQuestion.options,
+          validation: firstQuestion.validation,
+          examples: firstQuestion.examples,
+          inputHint: firstQuestion.inputHint,
+          helpText: firstQuestion.helpText
+        };
+      }
+
+      // 最後に回答した質問IDを取得
+      const lastAnsweredQId = allAnsweredQ2[allAnsweredQ2.length - 1];
+      const lastAnswer = answers[lastAnsweredQId];
+      
+      console.log('[Step 2] Last answered question:', lastAnsweredQId, 'Answer:', lastAnswer);
+
+      // 次の質問を取得
+      const nextQuestion = getNextStep2Question(lastAnsweredQId, lastAnswer, answers);
+      console.log('[Conversational] Step 2 next question:', nextQuestion?.id || 'complete');
+
+      // Step 2完了チェック
+      if (!nextQuestion && isStep2Complete(answers)) {
+        console.log('[Conversational] Step 2 complete!');
+        return null; // Step 2完了
+      }
+
+      if (nextQuestion) {
+        // 質問テキストが関数の場合は実行
+        const questionText = typeof nextQuestion.question === 'function'
+          ? nextQuestion.question(answers)
+          : nextQuestion.question;
+
+        return {
+          id: nextQuestion.id,
+          text: questionText,
+          type: nextQuestion.type,
+          options: nextQuestion.options,
+          validation: nextQuestion.validation,
+          examples: nextQuestion.examples,
+          inputHint: nextQuestion.inputHint,
+          helpText: nextQuestion.helpText
+        };
+      }
+
+      return null;
+    }
+
+    // Step 3以降は従来のフロー
     const questions = getStepQuestions(currentStep);
     const answeredQuestions = Object.keys(answers).filter(qId =>
       questions.some(q => q.id === qId)
@@ -1684,7 +1840,7 @@ const ChatContainer = () => {
   // 前の質問の回答を取得
   const getPreviousAnswer = (currentQuestionId) => {
     // Step 1は対話型フローを使用
-    if (currentStep === 1) {
+    if (currentStep === 1 || currentStep === 2) {
       // Q1-0-confirmの場合、Q1-0のGoogle Maps情報を返す
       if (currentQuestionId === 'Q1-0-confirm') {
         return answers['Q1-0'];
@@ -1803,13 +1959,52 @@ const ChatContainer = () => {
  * Google Maps typesから商品・サービスを推測
  */
 const inferServicesFromPlaceTypes = (types, name) => {
-  // Google Maps types mapping
-  const typeMapping = {
-    'restaurant': 'イタリア料理・ワイン販売',
-    'bar': 'バー・ワイン販売',
-    'cafe': 'カフェ・軽食',
+  // 店名からより具体的なヒントを得る（優先順位高）
+  if (name) {
+    const nameLower = name.toLowerCase();
+    
+    // ハンバーガー関連
+    if (nameLower.includes('burger') || nameLower.includes('ハンバーガ') || nameLower.includes('バーガー')) {
+      return 'ハンバーガー・ファストフード';
+    }
+    
+    // イタリア料理関連
+    if (nameLower.includes('italian') || nameLower.includes('イタリア') || 
+        nameLower.includes('pasta') || nameLower.includes('pizza') ||
+        nameLower.includes('wine') || nameLower.includes('bacchus') || nameLower.includes('ワイン')) {
+      return 'イタリア料理・ワイン販売';
+    }
+    
+    // カフェ関連
+    if (nameLower.includes('cafe') || nameLower.includes('coffee') || 
+        nameLower.includes('カフェ') || nameLower.includes('珈琲')) {
+      return 'カフェ・コーヒー';
+    }
+    
+    // 美容関連
+    if (nameLower.includes('salon') || nameLower.includes('サロン') || 
+        nameLower.includes('beauty') || nameLower.includes('美容')) {
+      return '美容・ヘアカット';
+    }
+    
+    // ラーメン関連
+    if (nameLower.includes('ramen') || nameLower.includes('ラーメン')) {
+      return 'ラーメン・麺類';
+    }
+    
+    // 寿司関連
+    if (nameLower.includes('sushi') || nameLower.includes('寿司') || nameLower.includes('すし')) {
+      return '寿司・和食';
+    }
+  }
+
+  // Google Maps types mapping（より具体的なtypeを優先）
+  const specificTypeMapping = {
     'bakery': 'パン・焼き菓子販売',
+    'cafe': 'カフェ・軽食',
+    'bar': 'バー・飲料販売',
     'meal_takeaway': 'テイクアウト料理',
+    'meal_delivery': 'デリバリー・配達',
     'clothing_store': '衣類販売',
     'shoe_store': '靴販売',
     'jewelry_store': 'ジュエリー販売',
@@ -1818,28 +2013,27 @@ const inferServicesFromPlaceTypes = (types, name) => {
     'spa': 'エステ・スパ',
     'gym': 'フィットネス・トレーニング',
     'hardware_store': '工具・建築資材販売',
-    'florist': '花・フラワーアレンジメント'
+    'florist': '花・フラワーアレンジメント',
+    'book_store': '書籍・雑誌販売',
+    'pet_store': 'ペット用品販売',
+    'liquor_store': '酒類販売'
   };
 
-  // typesから最初にマッチしたものを返す
+  // 具体的なtypeから先にチェック
   for (const type of types) {
-    if (typeMapping[type]) {
-      return typeMapping[type];
+    if (specificTypeMapping[type]) {
+      return specificTypeMapping[type];
     }
   }
 
-  // 店名からヒントを得る（例: "Crear Bacchus" → イタリア料理・ワイン）
-  if (name) {
-    const nameLower = name.toLowerCase();
-    if (nameLower.includes('wine') || nameLower.includes('bacchus')) {
-      return 'イタリア料理・ワイン販売';
-    }
-    if (nameLower.includes('cafe') || nameLower.includes('coffee')) {
-      return 'カフェ・コーヒー';
-    }
-    if (nameLower.includes('salon')) {
-      return '美容・ヘアカット';
-    }
+  // 一般的なrestaurantの場合は汎用的な表現を使用
+  if (types.includes('restaurant') || types.includes('food')) {
+    return '飲食・料理提供';
+  }
+
+  // storeの場合
+  if (types.includes('store')) {
+    return '商品販売';
   }
 
   return null;
