@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>Q1-NEW-1テスト用データ設定</title>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    button { padding: 10px 20px; margin: 10px 0; font-size: 16px; }
+    pre { background: #f4f4f4; padding: 10px; border-radius: 5px; overflow-x: auto; }
+    .success { color: green; }
+    .error { color: red; }
+  </style>
+</head>
+<body>
+  <h1>Q1-NEW-1テスト用データ設定</h1>
+
+  <div id="status">接続中...</div>
+
+  <button id="checkBtn">現在のアプリケーションを確認</button>
+  <button id="setupBtn">Q1-NEW-1の直前までデータを設定</button>
+
+  <h2>結果:</h2>
+  <pre id="output"></pre>
+
+  <script type="module">
+    // Firebase設定（firebaseConfig.jsから取得）
+    const firebaseConfig = {
+      apiKey: "AIzaSyDGQ-pqs6ceKuDYx8aJqM6aZfYvPPBnLMM",
+      authDomain: "aidant-app.firebaseapp.com",
+      projectId: "aidant-app",
+      storageBucket: "aidant-app.firebasestorage.app",
+      messagingSenderId: "920274502105",
+      appId: "1:920274502105:web:31c94f30b1c94beacc2ac3"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    const auth = firebase.auth();
+
+    const statusDiv = document.getElementById('status');
+    const outputPre = document.getElementById('output');
+
+    // 認証状態の確認
+    auth.onAuthStateChanged(user => {
+      if (user) {
+        statusDiv.innerHTML = `<span class="success">✓ ログイン中: ${user.email}</span>`;
+      } else {
+        statusDiv.innerHTML = '<span class="error">✗ ログインしていません。先にアプリでログインしてください。</span>';
+      }
+    });
+
+    // 現在のアプリケーションを確認
+    document.getElementById('checkBtn').addEventListener('click', async () => {
+      try {
+        const user = auth.currentUser;
+        if (!user) {
+          alert('ログインしてください');
+          return;
+        }
+
+        const snapshot = await db.collection('applications')
+          .where('userId', '==', user.uid)
+          .orderBy('createdAt', 'desc')
+          .limit(1)
+          .get();
+
+        if (snapshot.empty) {
+          outputPre.textContent = 'アプリケーションが見つかりません';
+          return;
+        }
+
+        const doc = snapshot.docs[0];
+        const data = doc.data();
+
+        const result = {
+          applicationId: doc.id,
+          currentStep: data.currentStep,
+          answeredQuestions: Object.keys(data.answers || {}).sort(),
+          answers: {
+            'Q1-0': data.answers['Q1-0']?.name || 'なし',
+            'Q1-1': data.answers['Q1-1'] || 'なし',
+            'Q1-3': data.answers['Q1-3'] || 'なし',
+            'Q1-3-multi': data.answers['Q1-3-multi'] || 'なし',
+            'Q1-NEW-1': data.answers['Q1-NEW-1'] || 'なし',
+            'Q1-NEW-1-manual': data.answers['Q1-NEW-1-manual'] || 'なし',
+            'Q1-NEW-1-generated': data.answers['Q1-NEW-1-generated'] || 'なし'
+          }
+        };
+
+        outputPre.textContent = JSON.stringify(result, null, 2);
+      } catch (error) {
+        outputPre.textContent = 'エラー: ' + error.message;
+      }
+    });
+
+    // Q1-NEW-1の直前までデータを設定
+    document.getElementById('setupBtn').addEventListener('click', async () => {
+      try {
+        const user = auth.currentUser;
+        if (!user) {
+          alert('ログインしてください');
+          return;
+        }
+
+        const snapshot = await db.collection('applications')
+          .where('userId', '==', user.uid)
+          .orderBy('createdAt', 'desc')
+          .limit(1)
+          .get();
+
+        if (snapshot.empty) {
+          outputPre.textContent = 'アプリケーションが見つかりません。先にアプリで新規申請を開始してください。';
+          return;
+        }
+
+        const docId = snapshot.docs[0].id;
+
+        // Q1-NEW-1の直前までの最小限のデータ
+        const testAnswers = {
+          'Q1-0': {
+            name: 'vestelia',
+            address: '東京都',
+            placeId: 'test123',
+            types: ['restaurant']
+          },
+          'Q1-1': '飲食業',
+          'Q1-3': 'ハンバーガーショップ',
+          'Q1-3-multi': ['店舗で提供']
+        };
+
+        await db.collection('applications').doc(docId).update({
+          answers: testAnswers,
+          currentStep: 1,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+
+        outputPre.textContent = `✓ データを設定しました\n\nアプリケーションID: ${docId}\n\n次はアプリでリロードしてQ1-NEW-1をテストしてください。`;
+
+      } catch (error) {
+        outputPre.textContent = 'エラー: ' + error.message;
+      }
+    });
+  </script>
+</body>
+</html>

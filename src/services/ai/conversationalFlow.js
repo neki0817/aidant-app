@@ -280,7 +280,54 @@ export const extractAnswersFromMaps = (placeData) => {
  * @param {String} input - ユーザー入力
  * @returns {Boolean} 質問かどうか
  */
+/**
+ * 相槌や肯定的な回答かどうかを判定
+ * @param {string} input - ユーザー入力
+ * @returns {boolean} - 相槌ならtrue
+ */
+export const isAcknowledgment = (input) => {
+  if (!input || input.trim().length < 2) {
+    return false;
+  }
+
+  const acknowledgmentPatterns = [
+    /^はい$/,
+    /^うん$/,
+    /^ええ$/,
+    /^そうです$/,
+    /^そうだと思います$/,
+    /^そう思います$/,
+    /^そうですね$/,
+    /^その通り$/,
+    /^そのとおり$/,
+    /^おっしゃる通り$/,
+    /^おっしゃるとおり$/,
+    /^たぶん$/,
+    /^おそらく$/,
+    /^多分$/,
+    /^恐らく$/,
+    /^そうかも$/,
+    /^そうかもしれません$/,
+    /^かもしれません$/,
+    /^だと思います$/,
+    /^と思います$/
+  ];
+
+  const trimmed = input.trim();
+  return acknowledgmentPatterns.some(pattern => pattern.test(trimmed));
+};
+
 export const isUserQuestion = (input) => {
+  // 空または短すぎる入力は質問として扱わない
+  if (!input || input.trim().length < 2) {
+    return false;
+  }
+
+  // 相槌の場合は質問として扱わない
+  if (isAcknowledgment(input)) {
+    return false;
+  }
+
   const questionPatterns = [
     /^[?？]/,
     /どういう意味/,
@@ -292,7 +339,22 @@ export const isUserQuestion = (input) => {
     /何ですか/,
     /なんですか/,
     /どうして/,
-    /なぜ/
+    /なぜ/,
+    /どう/,
+    /どのように/,
+    /いつ/,
+    /どこ/,
+    /だれ/,
+    /[?？]$/,  // 末尾に?がある
+    /できますか/,
+    /してもいい/,
+    /どうすれば/,
+    /方法/,
+    /やり方/,
+    /ありますか/,  // 「口コミがありますか？」など
+    /あるんですか/,
+    /見せて/,
+    /教えて/
   ];
 
   return questionPatterns.some(pattern => pattern.test(input));
@@ -306,22 +368,104 @@ export const isUserQuestion = (input) => {
  * @returns {Promise<String>} AI回答
  */
 export const answerUserQuestion = async (currentQuestion, userQuestion, context = {}) => {
-  // 簡単な質問は事前定義の回答を返す
+  const lowerQuestion = userQuestion.toLowerCase();
+  const { answers = {} } = context;
+
+  // Google Maps情報を取得
+  const placeInfo = answers['Q1-0'] || {};
+  const reviews = placeInfo.reviews || [];
+  const rating = placeInfo.rating || 0;
+  const userRatingsTotal = placeInfo.userRatingsTotal || 0;
+
+  // 口コミ関連の質問
+  if (lowerQuestion.includes('口コミ') || lowerQuestion.includes('レビュー') || lowerQuestion.includes('評価')) {
+    if (lowerQuestion.includes('ありますか') || lowerQuestion.includes('あるんですか')) {
+      if (reviews.length > 0) {
+        const topReviews = reviews.slice(0, 3);
+        let reviewText = `はい、Google Mapsに${userRatingsTotal}件の口コミがあります（評価: ${rating}）\n\n【最新の口コミ】\n`;
+        topReviews.forEach((review, index) => {
+          reviewText += `\n${index + 1}. ⭐${review.rating} - ${review.text.substring(0, 100)}${review.text.length > 100 ? '...' : ''}\n`;
+        });
+        reviewText += `\nこれらの口コミから、お客様に評価されているポイントが見えてきますね。`;
+        return reviewText;
+      } else {
+        return 'Google Mapsの口コミ情報が見つかりませんでした。口コミがない場合でも、実際のお客様の声や反応を思い出して答えてください。';
+      }
+    }
+
+    if (lowerQuestion.includes('見せて') || lowerQuestion.includes('教えて') || lowerQuestion.includes('確認')) {
+      if (reviews.length > 0) {
+        const topReviews = reviews.slice(0, 5);
+        let reviewText = `Google Mapsの口コミ（評価: ${rating}、${userRatingsTotal}件）\n\n`;
+        topReviews.forEach((review, index) => {
+          reviewText += `【口コミ ${index + 1}】\n⭐ ${review.rating}\n${review.text}\n投稿者: ${review.author_name}\n\n`;
+        });
+        return reviewText;
+      } else {
+        return 'Google Mapsの口コミ情報がありません。';
+      }
+    }
+  }
+
+  // 例を教えてほしい
+  if (lowerQuestion.includes('例') && (lowerQuestion.includes('教えて') || lowerQuestion.includes('見せて') || lowerQuestion.includes('ください'))) {
+    if (currentQuestion.placeholder) {
+      return `例として、以下のような回答が考えられます：\n\n${currentQuestion.placeholder}\n\nこのような形で、あなたのお店に当てはめて答えてください。`;
+    } else {
+      return '申し訳ありません。この質問には例がありません。わかる範囲で具体的に答えてください。';
+    }
+  }
+
+  // もっと詳しく教えて
+  if (lowerQuestion.includes('詳しく') || lowerQuestion.includes('もっと')) {
+    return `「${currentQuestion.text}」について詳しく説明しますね。\n\n${currentQuestion.helpText || '補助金審査では、この情報が重要な評価ポイントになります。'}\n\n${currentQuestion.placeholder ? `例：${currentQuestion.placeholder}` : ''}\n\nこのような情報を教えていただけると助かります。`;
+  }
+
+  // 質問のタイプ別に回答を生成
   const quickAnswers = {
     '必要ですか': `はい、「${currentQuestion.text}」は補助金審査で重要な評価ポイントです。${currentQuestion.helpText || ''}`,
     '必須ですか': currentQuestion.required
       ? 'はい、この質問は必須です。'
       : 'いいえ、任意です。ただし、回答いただくと審査で有利になります。',
-    'わからない': `大丈夫です！${currentQuestion.placeholder || '例を参考に'}、わかる範囲で教えてください。正確な数字でなくても構いません。`
+    'わからない': `大丈夫です！${currentQuestion.placeholder || '例を参考に'}、わかる範囲で教えてください。正確な数字でなくても構いません。`,
+    'どう答えれば': `${currentQuestion.placeholder || '例を参考に'}のように答えてください。${currentQuestion.helpText || ''}`,
+    'スキップ': currentQuestion.required
+      ? 'この質問は必須なので、スキップできません。わかる範囲で答えてください。'
+      : 'スキップしたい場合は、「スキップ」と入力してください。',
+    '後で': 'わかりました。では次の質問に進みます。後で戻って回答することもできます。',
+    '意味': `「${currentQuestion.text}」というのは、${currentQuestion.helpText || '補助金申請に必要な情報'}のことです。`,
+    '税込': '価格は税込でも税別でも構いません。お客様に提示している価格（税込）で答えていただくのが一般的です。',
+    '税別': '価格は税込でも税別でも構いません。お客様に提示している価格（税込）で答えていただくのが一般的です。',
+    '税抜': '価格は税込でも税別でも構いません。お客様に提示している価格（税込）で答えていただくのが一般的です。',
+    'どっち': currentQuestion.type === 'number' && currentQuestion.suffix === '円'
+      ? '価格の場合は、お客様に提示している価格（通常は税込）で答えてください。税込・税別どちらでも構いませんが、統一してください。'
+      : `${currentQuestion.placeholder || '例を参考に'}のように答えてください。`
   };
 
+  // キーワードマッチング
   for (const [key, answer] of Object.entries(quickAnswers)) {
-    if (userQuestion.includes(key)) {
+    if (lowerQuestion.includes(key)) {
       return answer;
     }
   }
 
-  // 複雑な質問はAIに渡す
-  // （次のステップで実装）
-  return '申し訳ございません。その質問にはお答えできません。具体的にどの点がわかりませんか？';
+  // 一般的な会話パターン
+  if (lowerQuestion.includes('こんにちは') || lowerQuestion.includes('はじめまして')) {
+    return 'こんにちは！補助金申請のお手伝いをさせていただきます。わからないことがあれば、いつでも質問してくださいね。';
+  }
+
+  if (lowerQuestion.includes('ありがとう')) {
+    return 'どういたしまして！一緒に頑張りましょう。';
+  }
+
+  if (lowerQuestion.includes('難しい') || lowerQuestion.includes('むずかしい')) {
+    return '難しく感じるかもしれませんが、一問ずつ答えていけば大丈夫です。わかる範囲で構いませんので、気軽に答えてください。';
+  }
+
+  if (lowerQuestion.includes('時間') || lowerQuestion.includes('どれくらい')) {
+    return '全体で約20分程度で完了します。今は少しずつ進めていきましょう。';
+  }
+
+  // デフォルト回答
+  return `ご質問ありがとうございます。\n\n現在は「${currentQuestion.text}」についてお聞きしています。${currentQuestion.helpText || ''}\n\n具体的にどの点がわかりませんか？`;
 };

@@ -65,7 +65,33 @@ export const AuthProvider = ({ children }) => {
   const login = async (email, password) => {
     try {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      return userCredential.user;
+      const user = userCredential.user;
+
+      // ユーザードキュメントが存在するか確認
+      const userDoc = await getDoc(doc(db, 'users', user.uid));
+
+      // ドキュメントが存在しない場合は作成（既存ユーザーの救済措置）
+      if (!userDoc.exists()) {
+        console.log('User document not found. Creating new document for existing user:', user.uid);
+        await setDoc(doc(db, 'users', user.uid), {
+          userId: user.uid,
+          email: user.email,
+          pointBalance: 5000, // 初期ポイント
+          createdAt: new Date(),
+          updatedAt: new Date()
+        });
+
+        // 初期ポイント付与のトランザクション記録
+        await addDoc(collection(db, 'point_transactions'), {
+          userId: user.uid,
+          type: 'grant',
+          amount: 5000,
+          description: '既存ユーザー初回ログイン',
+          timestamp: new Date()
+        });
+      }
+
+      return user;
     } catch (error) {
       console.error('ログインエラー:', error);
       throw error;

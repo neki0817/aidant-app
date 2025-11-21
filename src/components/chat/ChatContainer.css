@@ -265,3 +265,36 @@
     padding: 12px;
   }
 }
+
+/* Phase 2 会話形式用のローディング表示 */
+.phase2-loading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  background: #f0f0f0;
+  border-radius: 8px;
+  margin: 12px 0;
+  border-left: 4px solid #667eea;
+}
+
+.phase2-loading .spinner {
+  width: 20px;
+  height: 20px;
+  border: 3px solid #ddd;
+  border-top-color: #667eea;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.phase2-loading .loading-text {
+  color: #666;
+  font-size: 0.95rem;
+  font-weight: 500;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

@@ -1,0 +1,37 @@
+      // 自動分析タイプの質問の場合、即座に実行
+      if (question.type === 'auto_analyze_competitors' || question.type === 'auto_analyze_reviews') {
+        console.log('[Auto Analysis] Detected auto analysis type:', question.type);
+
+        // 非同期で自動分析を実行
+        (async () => {
+          try {
+            setIsLoading(true);
+
+            // 分析結果を取得
+            const analysisResult = await executeAutoAnalysis(question.id, question.type, answers);
+
+            console.log('[Auto Analysis] Result:', analysisResult);
+
+            // 結果を保存
+            updateAnswer(question.id, analysisResult);
+
+            setIsLoading(false);
+
+            // 次の質問に自動遷移
+            // useEffectが再度トリガーされて次の質問が表示される
+          } catch (error) {
+            console.error('[Auto Analysis] Error:', error);
+            addAIMessage(`分析中にエラーが発生しました: ${error.message}\n\n手動で入力してください。`);
+            setIsLoading(false);
+
+            // エラー時は手動入力にフォールバック
+            if (question.type === 'auto_analyze_competitors') {
+              updateAnswer(question.id, { competitors: [], error: error.message });
+            } else if (question.type === 'auto_analyze_reviews') {
+              updateAnswer(question.id, { keywords: [], strengthsText: '', error: error.message });
+            }
+          }
+        })();
+
+        return; // これ以上の処理をスキップ
+      }

@@ -1,0 +1,264 @@
+// Q1-NEW-1〜Q1-NEW-5: 事業の特徴・強み（セクション1-1）
+// これらの質問をconversationalQuestionsStep1.jsのQ1-3-multiの後に追加する
+
+export const Q1_NEW_QUESTIONS = [
+  // Q1-NEW-1: コンセプトの回答方法を選択
+  {
+    id: 'Q1-NEW-1',
+    priority: 5.6,
+    text: '事業のコンセプトについて、どのように回答しますか？',
+    type: 'single_select',
+    options: [
+      { value: 'ai-assisted', label: 'AIに質問に答えて、コンセプト文を自動生成してもらう' },
+      { value: 'manual', label: '自分で直接コンセプトを入力する' }
+    ],
+    required: true,
+    dependencies: ['Q1-3-multi'],
+    aiEnhance: false,
+    helpText: '💡 文章作成が苦手な方は「AI自動生成」、独自のコンセプトがある方は「直接入力」をお選びください'
+  },
+
+  // Q1-NEW-1-manual: 手動でコンセプトを入力（条件付き）
+  {
+    id: 'Q1-NEW-1-manual',
+    priority: 5.61,
+    text: 'あなたの事業のコンセプトや特徴を教えてください',
+    type: 'textarea',
+    placeholder: '例：本格的なイタリア料理を手頃な価格で提供することをコンセプトに、地域のお客様を中心に営業しています',
+    required: true,
+    dependencies: ['Q1-NEW-1'],
+    condition: (answers) => answers['Q1-NEW-1'] === 'manual',
+    aiEnhance: false,
+    maxLength: 200,
+    helpText: '💡 あなたの事業が「何を大切にしているか」「どんな価値を提供しているか」を自由に書いてください'
+  },
+
+  // Q1-NEW-1-ai-1: 価格帯（AI自動生成パス・条件付き）
+  {
+    id: 'Q1-NEW-1-ai-1',
+    priority: 5.62,
+    text: 'あなたの事業の価格帯はどれに当てはまりますか？',
+    type: 'single_select',
+    options: [
+      { value: 'high', label: '高級（特別な日向け、こだわりの価格帯）' },
+      { value: 'medium', label: '中価格（手頃な価格、利用しやすい）' },
+      { value: 'low', label: '低価格（気軽に利用できる、リーズナブル）' }
+    ],
+    required: true,
+    dependencies: ['Q1-NEW-1'],
+    condition: (answers) => answers['Q1-NEW-1'] === 'ai-assisted',
+    aiEnhance: false,
+    helpText: '💡 お客様が感じる価格帯のイメージを選択してください'
+  },
+
+  // Q1-NEW-1-ai-2: 雰囲気（AI自動生成パス・条件付き）
+  {
+    id: 'Q1-NEW-1-ai-2',
+    priority: 5.63,
+    text: 'どのような雰囲気を大切にしていますか？',
+    type: 'single_select',
+    options: [
+      { value: 'casual', label: 'カジュアル・気軽' },
+      { value: 'elegant', label: '落ち着いた・上質' },
+      { value: 'modern', label: 'モダン・おしゃれ' },
+      { value: 'homely', label: 'アットホーム・親しみやすい' }
+    ],
+    required: true,
+    dependencies: ['Q1-NEW-1-ai-1'],
+    aiEnhance: false,
+    helpText: '💡 店舗や事業の雰囲気・イメージを選択してください'
+  },
+
+  // Q1-NEW-1-ai-3: こだわり（AI自動生成パス・条件付き）
+  {
+    id: 'Q1-NEW-1-ai-3',
+    priority: 5.64,
+    text: '商品・サービスの一番のこだわりは何ですか？',
+    type: 'single_select',
+    options: [
+      { value: 'quality', label: '本格的な味・高品質' },
+      { value: 'price', label: '手頃な価格・コスパ' },
+      { value: 'speed', label: 'スピード・利便性' },
+      { value: 'unique', label: '独自性・オリジナリティ' }
+    ],
+    required: true,
+    dependencies: ['Q1-NEW-1-ai-2'],
+    aiEnhance: false,
+    helpText: '💡 お客様に一番アピールしたいポイントを選択してください'
+  },
+
+  // Q1-NEW-1-generated: AI生成されたコンセプト（自動実行）
+  {
+    id: 'Q1-NEW-1-generated',
+    priority: 5.65,
+    text: '',
+    type: 'ai_concept_generation',
+    required: false,
+    dependencies: ['Q1-NEW-1-ai-3'],
+    aiEnhance: false,
+    autoProgress: true,
+    generateMessage: (answers) => {
+      const priceLevel = answers['Q1-NEW-1-ai-1'];
+      const atmosphere = answers['Q1-NEW-1-ai-2'];
+      const focus = answers['Q1-NEW-1-ai-3'];
+      const businessType = answers['Q1-3']; // 具体的な業態
+
+      // コンセプト文を生成
+      let concept = '';
+
+      // 雰囲気の表現
+      const atmosphereMap = {
+        'casual': '気軽に楽しめる',
+        'elegant': '落ち着いた雰囲気の',
+        'modern': 'モダンでおしゃれな',
+        'homely': 'アットホームで親しみやすい'
+      };
+
+      // こだわりの表現
+      const focusMap = {
+        'quality': '本格的な',
+        'price': '手頃な価格の',
+        'speed': '利便性の高い',
+        'unique': '独自性のある'
+      };
+
+      // 価格帯の表現
+      const priceLevelMap = {
+        'high': 'こだわりの',
+        'medium': '手頃な価格で楽しめる',
+        'low': '気軽に利用できる'
+      };
+
+      // 文章を自然に組み立てる
+      const atmosphereText = atmosphereMap[atmosphere] || '';
+      const focusText = focusMap[focus] || '';
+      const priceText = priceLevelMap[priceLevel] || '';
+
+      // パターン1: 雰囲気 + こだわり + 業態 + 価格
+      if (priceLevel === 'medium' || priceLevel === 'low') {
+        concept = `${atmosphereText}${focusText}${businessType || 'サービス'}を${priceText}提供しています`;
+      } else {
+        // パターン2: 高級の場合
+        concept = `${atmosphereText}${priceText}${focusText}${businessType || 'サービス'}を提供しています`;
+      }
+
+      return concept;
+    }
+  },
+
+  // Q1-NEW-2: 経営者の経歴・専門性
+  {
+    id: 'Q1-NEW-2',
+    priority: 5.7,
+    text: '経営者（あなた）の経歴や専門性を教えてください',
+    type: 'textarea',
+    placeholder: '例：イタリア・トスカーナ地方で5年間修行し、現地のリストランテで料理長を務めた経験があります',
+    required: true,
+    dependencies: ['Q1-NEW-1'], // どちらのパスでも、Q1-NEW-1の回答後に表示される
+    condition: (answers) => {
+      // 手動入力パス: Q1-NEW-1-manualが回答済み
+      // AI生成パス: Q1-NEW-1-generatedが存在（autoProgressで自動的に設定される）
+      return answers['Q1-NEW-1-manual'] || answers['Q1-NEW-1-generated'];
+    },
+    aiEnhance: true,
+    maxLength: 300,
+    helpText: '💡 この事業に関連する経験や資格、修行期間などを教えてください。\n\n特にない場合は「特になし」と入力してください',
+    generateSuggestion: (answers) => {
+      const businessType = answers['Q1-1'];
+
+      if (!businessType) return null;
+
+      // 業種別の経歴例を提案
+      if (businessType.includes('レストラン') || businessType.includes('飲食')) {
+        return '〇〇で5年間修行し、料理長として勤務した経験があります';
+      } else if (businessType.includes('カフェ')) {
+        return 'バリスタとして〇年の経験があり、ラテアートの資格も保有しています';
+      } else if (businessType.includes('美容')) {
+        return '美容師免許取得後、都内の人気サロンで10年間勤務し、独立しました';
+      } else if (businessType.includes('小売')) {
+        return '業界で〇年の販売経験があり、お客様のニーズを理解した品揃えを心がけています';
+      } else if (businessType.includes('製造')) {
+        return '〇〇の技術を学び、〇年間の実務経験を積んでから独立しました';
+      } else if (businessType.includes('サービス')) {
+        return '〇〇の資格を保有し、〇年間の実務経験があります';
+      } else {
+        return '業界での実務経験を活かして事業を始めました';
+      }
+    }
+  },
+
+  // Q1-NEW-3: こだわりポイント
+  {
+    id: 'Q1-NEW-3',
+    priority: 5.8,
+    text: '商品・サービスの「こだわり」を教えてください',
+    type: 'textarea',
+    placeholder: '例：食材は信頼できるイタリアの生産者から直輸入しており、他店では味わえない本格的な料理を提供しています',
+    required: true,
+    dependencies: ['Q1-NEW-2'],
+    aiEnhance: true,
+    maxLength: 200,
+    helpText: '💡 原材料、製法、技術、設備など、品質を支える「こだわり」を具体的に書いてください。\n\n特にない場合は「特になし」と入力してください',
+    generateSuggestion: (answers) => {
+      const businessType = answers['Q1-1'];
+      const tabelogData = answers['Q1-0-tabelog'];
+
+      if (!businessType) return null;
+
+      const keywords = tabelogData?.keywords || [];
+      const hasQualityKeyword = keywords.some(k =>
+        k.includes('美味しい') || k.includes('本格') || k.includes('こだわり') || k.includes('丁寧')
+      );
+
+      if (businessType.includes('レストラン') || businessType.includes('飲食')) {
+        if (hasQualityKeyword) {
+          return '厳選した食材を使用し、伝統的な調理法にこだわって本場の味を再現しています';
+        }
+        return '新鮮な食材を毎日仕入れ、素材の味を活かした料理を提供しています';
+      } else if (businessType.includes('カフェ')) {
+        if (hasQualityKeyword) {
+          return '豆の産地・焙煎にこだわり、一杯一杯丁寧に淹れた本格コーヒーを提供しています';
+        }
+        return '厳選したコーヒー豆を使用し、居心地の良い空間づくりにこだわっています';
+      } else if (businessType.includes('美容')) {
+        if (hasQualityKeyword) {
+          return '最新技術と高品質な薬剤を使用し、お客様一人ひとりに合わせた施術を行っています';
+        }
+        return 'お客様のご要望を丁寧にヒアリングし、満足いただける仕上がりを目指しています';
+      } else if (businessType.includes('小売')) {
+        if (hasQualityKeyword) {
+          return '品質にこだわった商品を厳選し、お客様に安心して使っていただける商品のみを取り揃えています';
+        }
+        return 'お客様のニーズに合わせた品揃えと、丁寧な接客を心がけています';
+      } else {
+        return 'お客様満足度を第一に考え、高品質なサービス提供を心がけています';
+      }
+    }
+  },
+
+  // Q1-NEW-4: ターゲット顧客層
+  {
+    id: 'Q1-NEW-4',
+    priority: 5.9,
+    text: '主な顧客層を教えてください',
+    type: 'text',
+    placeholder: '例：30代〜50代の女性、ファミリー層',
+    required: true,
+    dependencies: ['Q1-NEW-3'],
+    aiEnhance: true,
+    helpText: '💡 年齢層、性別、家族構成、職業など、わかる範囲で教えてください'
+  },
+
+  // Q1-NEW-5: 顧客の利用パターン
+  {
+    id: 'Q1-NEW-5',
+    priority: 5.95,
+    text: '顧客の利用パターンを教えてください',
+    type: 'text',
+    placeholder: '例：平日はランチ利用、週末はディナー利用が中心',
+    required: true,
+    dependencies: ['Q1-NEW-4'],
+    aiEnhance: true,
+    helpText: '💡 平日/週末、昼/夜、季節変動など、利用の傾向を教えてください'
+  }
+];

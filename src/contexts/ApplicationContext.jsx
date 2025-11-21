@@ -8,14 +8,14 @@ import {
   updateApplicationMarketData,
   updateApplicationGeneratedDocument
 } from '../services/firestore/collections';
-import { generateSubsidyApplication } from '../services/gemini/gemini';
+import { generateSubsidyApplication } from '../services/openai/openai';
 import { useAuth } from './AuthContext';
 
 const ApplicationContext = createContext();
 
 export const ApplicationProvider = ({ children }) => {
   const { currentUser: user } = useAuth();
-  const [currentStep, setCurrentStep] = useState(1);
+  const [currentStep, setCurrentStep] = useState(0);  // Phase 0（補助対象判定）から開始
   const [answers, setAnswers] = useState({});
   const [placeInfo, setPlaceInfo] = useState(null);
   const [marketData, setMarketData] = useState(null);
@@ -38,7 +38,7 @@ export const ApplicationProvider = ({ children }) => {
 
       const application = await createApplication(user.uid, industry);
       setCurrentApplication(application);
-      setCurrentStep(1);
+      setCurrentStep(0);  // Phase 0（補助対象判定）から開始
       console.log('🔴 Resetting answers to empty object');
       setAnswers({});
       setPlaceInfo(null);
@@ -115,10 +115,11 @@ export const ApplicationProvider = ({ children }) => {
 
   // ステップの更新
   const nextStep = async () => {
-    if (currentStep < 5) {
+    // Phase 0~5の6つのフェーズがあるため、currentStep < 6に変更
+    if (currentStep < 6) {
       const newStep = currentStep + 1;
       setCurrentStep(newStep);
-      
+
       if (currentApplication) {
         await updateApplicationStep(currentApplication.id, newStep);
       }
@@ -126,15 +127,16 @@ export const ApplicationProvider = ({ children }) => {
   };
 
   const prevStep = () => {
-    if (currentStep > 1) {
+    if (currentStep > 0) {  // Phase 0が最初のステップ
       setCurrentStep(currentStep - 1);
     }
   };
 
   const goToStep = async (step) => {
-    if (step >= 1 && step <= 5) {
+    // Phase 0~5の範囲でステップ移動可能
+    if (step >= 0 && step <= 5) {
       setCurrentStep(step);
-      
+
       if (currentApplication) {
         await updateApplicationStep(currentApplication.id, step);
       }
@@ -204,7 +206,7 @@ export const ApplicationProvider = ({ children }) => {
     }
   };
 
-  // Gemini APIで申請書を生成
+  // OpenAI APIで申請書を生成
   const generateApplication = async () => {
     if (!currentApplication) {
       throw new Error('No active application');
@@ -219,15 +221,15 @@ export const ApplicationProvider = ({ children }) => {
       setLoading(true);
       setError(null);
 
-      console.log('Generating application with Gemini API...');
+      console.log('Generating application with OpenAI API...');
 
-      // Gemini APIで申請書を生成
+      // OpenAI APIで申請書を生成
       const generatedText = await generateSubsidyApplication(answers);
 
       const document = {
         content: generatedText,
         generatedAt: new Date().toISOString(),
-        model: 'gemini-2.0-flash-exp'
+        model: 'gpt-4o'
       };
 
       // 生成した文書を保存

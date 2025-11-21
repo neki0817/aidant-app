@@ -8,12 +8,10 @@
  * @created 2025-01-19
  */
 
-import OpenAI from 'openai';
-
-const openai = new OpenAI({
-  apiKey: process.env.REACT_APP_OPENAI_API_KEY,
-  dangerouslyAllowBrowser: true
-});
+/**
+ * ⚠️ OpenAI APIは現在無効化されています（セキュリティ対策）
+ * 将来的にCloud Functions経由で実装予定
+ */
 
 /**
  * 数値目標の現実性をチェック
@@ -251,77 +249,11 @@ export const validateSalesChannelConnection = (answers) => {
  * @returns {Promise<Array>} 問題点の配列
  */
 export const detectContradictionsWithAI = async (answers) => {
-  try {
-    const relevantAnswers = {
-      philosophy: answers['Q2-5'],
-      targetAge: answers['Q3-1'],
-      targetAttributes: answers['Q3-1-1'],
-      purpose: answers['Q3-2'],
-      competitors: answers['Q3-5'],
-      plan: answers['Q5-1'],
-      initiatives: answers['Q5-2'],
-      salesGoal: answers['Q5-9'],
-      newCustomerGoal: answers['Q5-8']
-    };
+  console.log('[Validation] ⚠️ OpenAI API is disabled for security. AI-based contradiction detection is not available.');
 
-    const prompt = `以下の補助金申請内容を分析し、論理的矛盾や問題点を検出してください。
-
-【申請内容】
-${JSON.stringify(relevantAnswers, null, 2)}
-
-【検出すべき問題】
-1. 論理的矛盾（経営理念と計画の不整合など）
-2. ターゲット顧客と取組内容の不一致
-3. 非現実的な数値目標（実績の2倍以上など）
-4. 競合分析と差別化戦略の不整合
-5. 販路開拓とのつながりが不明確な取組
-
-【出力形式】
-JSON配列で以下の形式で返してください：
-[
-  {
-    "type": "問題タイプ",
-    "severity": "high|medium|low",
-    "message": "問題の説明",
-    "suggestion": "改善提案",
-    "affectedFields": ["関連する質問ID"]
-  }
-]
-
-問題がない場合は空配列 [] を返してください。`;
-
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content: `あなたは小規模事業者持続化補助金の審査専門家です。
-申請内容の論理的矛盾や問題点を厳しくチェックします。
-
-【重要な観点】
-- 経営理念と計画の一貫性
-- ターゲット顧客と施策の適合性
-- 数値目標の現実性（実績の1.2〜1.3倍が適切）
-- 販路開拓（新規顧客獲得・売上向上）との明確なつながり
-
-批判的な視点で分析し、具体的な改善提案を行ってください。`
-        },
-        {
-          role: "user",
-          content: prompt
-        }
-      ],
-      response_format: { type: "json_object" },
-      temperature: 0.3
-    });
-
-    const result = JSON.parse(completion.choices[0].message.content);
-    return result.issues || [];
-
-  } catch (error) {
-    console.error('[Validation] AI contradiction detection error:', error);
-    return [];
-  }
+  // ⚠️ OpenAI API呼び出しは無効化されています（セキュリティ対策）
+  // AI矛盾検出機能は将来的にCloud Functions経由で実装予定
+  return [];
 };
 
 /**

@@ -128,24 +128,25 @@ const PlaceAutocomplete = ({ onPlaceSelected, defaultValue = '' }) => {
         const service = new window.google.maps.places.PlacesService(document.createElement('div'));
         const request = {
           placeId: place.place_id,
-          fields: ['reviews']
+          fields: ['reviews', 'priceLevel']
         };
 
         service.getDetails(request, (placeDetails, status) => {
           if (status === window.google.maps.places.PlacesServiceStatus.OK) {
             console.log('Place details retrieved:', placeDetails);
-            // 口コミを抽出
+            // 口コミと価格帯を抽出
             const reviews = placeDetails.reviews || [];
-            processPlaceData(place, reviews);
+            const priceLevel = placeDetails.priceLevel;
+            processPlaceData(place, reviews, priceLevel);
           } else {
             console.warn('Failed to get place details:', status);
-            processPlaceData(place, []);
+            processPlaceData(place, [], undefined);
           }
         });
       });
 
       // 場所データを処理する関数
-      const processPlaceData = (place, reviews) => {
+      const processPlaceData = (place, reviews, priceLevel) => {
 
         // 住所コンポーネントから詳細情報を抽出
         const addressComponents = place.address_components || [];
@@ -185,6 +186,7 @@ const PlaceAutocomplete = ({ onPlaceSelected, defaultValue = '' }) => {
           website: place.website || '',
           rating: place.rating || 0,
           userRatingsTotal: place.user_ratings_total || 0,
+          priceLevel: priceLevel,
           openingHours: place.opening_hours && place.opening_hours.weekday_text ? {
             weekdayText: place.opening_hours.weekday_text || []
           } : { weekdayText: [] },

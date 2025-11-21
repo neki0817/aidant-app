@@ -2,6 +2,7 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
+import { getStorage } from 'firebase/storage';
 
 // Firebase設定情報
 // .envファイルの環境変数から取得
@@ -20,6 +21,7 @@ const app = initializeApp(firebaseConfig);
 // 認証とFirestoreのインスタンスを取得
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+export const storage = getStorage(app);
 
 // デバッグ用：Firestoreインスタンスの確認
 console.log('Firebase initialized:', { app, auth, db });

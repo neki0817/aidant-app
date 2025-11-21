@@ -9,14 +9,14 @@
  * - 業種に応じて「販売先」「顧客層」の質問を切り替え
  */
 
-import { getCustomerQuestion, getProductCategoryExamples } from './industryClassifier';
+import { getProductCategoryExamples } from './industryClassifier';
 
 export const conversationalQuestionsStep2 = [
   // ===== 商品・サービス情報 =====
   // 1位の製品・サービス
   {
     id: 'Q2-1',
-    question: 'まず、御社が提供している主要な製品・サービスについて教えてください。\n\n売上構成で1番大きい製品・サービスのカテゴリーは何ですか？',
+    question: 'まず、お店で一番人気の商品・サービスは何ですか？',
     type: 'text',
     priority: 1,
     category: '商品・サービス',
@@ -24,78 +24,58 @@ export const conversationalQuestionsStep2 = [
       required: true,
       minLength: 2,
       maxLength: 100,
-      errorMessage: '製品・サービスのカテゴリーを2文字以上100文字以内で入力してください'
+      errorMessage: '2文字以上100文字以内で入力してください'
     },
-    helpText: '例：「ランチ定食」ではなく「定食類」、「カット＋カラー」ではなく「美容施術」のようにカテゴリーで入力してください',
+    helpText: '💡 具体的な商品名・メニュー名で構いません',
     examples: (answers) => getProductCategoryExamples(answers),
     nextQuestion: (answer, answers) => 'Q2-2'
   },
 
   {
     id: 'Q2-2',
-    question: (answers) => `「${answers['Q2-1']}」の年間売上高はいくらですか？\n\n※ 直近1年間の概算で構いません`,
+    question: (answers) => `「${answers['Q2-1']}」の単価はいくらですか？\n\n※ 代表的な価格で構いません`,
     type: 'number',
     priority: 1,
     category: '商品・サービス',
     validation: {
       required: true,
       min: 1,
-      max: 100000,
+      max: 1000000,
       isInteger: true,
-      errorMessage: '1〜100000の整数で入力してください（万円単位）'
+      errorMessage: '1〜1000000の整数で入力してください（円単位）'
     },
-    inputHint: '例：500（万円）',
-    helpText: '万円単位で入力してください。例：年間売上が500万円の場合は「500」と入力',
+    inputHint: '例：1200（円）',
+    helpText: '円単位で入力してください。例：ランチ定食1,200円の場合は「1200」と入力',
     nextQuestion: (answer, answers) => 'Q2-3'
   },
 
   {
     id: 'Q2-3',
-    question: (answers) => `「${answers['Q2-1']}」の売上構成比は何%ですか？\n\n※ 全体売上に占める割合の目安で構いません`,
-    type: 'number',
+    question: (answers) => `「${answers['Q2-1']}」が売れている理由は何だと思いますか？`,
+    type: 'textarea',
     priority: 1,
     category: '商品・サービス',
     validation: {
       required: true,
-      min: 1,
-      max: 100,
-      isInteger: true,
-      errorMessage: '1〜100の整数で入力してください'
+      minLength: 10,
+      maxLength: 300,
+      errorMessage: '10文字以上300文字以内で入力してください'
     },
-    inputHint: '例：35（%）',
-    nextQuestion: (answer, answers) => 'Q2-4'
-  },
-
-  {
-    id: 'Q2-4',
-    question: (answers) => {
-      const customerQ = getCustomerQuestion(answers, answers['Q2-1']);
-      return customerQ.question;
-    },
-    type: 'text',
-    priority: 1,
-    category: '商品・サービス',
-    validation: {
-      required: true,
-      minLength: 2,
-      maxLength: 200,
-      errorMessage: '2文字以上200文字以内で入力してください'
-    },
-    examples: (answers) => {
-      const customerQ = getCustomerQuestion(answers, answers['Q2-1']);
-      return customerQ.examples;
-    },
-    inputHint: (answers) => {
-      const customerQ = getCustomerQuestion(answers, answers['Q2-1']);
-      return customerQ.inputHint;
-    },
+    inputHint: '例：コスパが良く、ボリュームがあるから',
+    helpText: 'お客様の声や、ご自身の考えを自由に記入してください',
+    examples: [
+      'コストパフォーマンスが良く、ボリュームがあるから',
+      '技術力が高く、仕上がりが綺麗だから',
+      '立地が良く、アクセスしやすいから',
+      '他店にないオリジナル商品だから'
+    ],
     nextQuestion: (answer, answers) => 'Q2-5'
   },
 
   // 2位の製品・サービス
   {
     id: 'Q2-5',
-    question: '売上構成で2番目に大きい製品・サービスのカテゴリーは何ですか？\n\n※ ない場合は「なし」と入力してください',
+    question: '2番目に人気の商品・サービスは何ですか？\n\n※ ない場合は「なし」と入力してください',
     type: 'text',
     priority: 1,
     category: '商品・サービス',
@@ -112,7 +92,7 @@ export const conversationalQuestionsStep2 = [
     ],
     nextQuestion: (answer, answers) => {
       if (answer === 'なし' || answer === 'ない') {
-        return 'Q2-13'; // 顧客層の質問へスキップ
+        return 'Q2-12-sales'; // 売上・利益の質問へスキップ
       }
       return 'Q2-6';
     }
@@ -120,68 +100,47 @@ export const conversationalQuestionsStep2 = [
 
   {
     id: 'Q2-6',
-    question: (answers) => `「${answers['Q2-5']}」の年間売上高はいくらですか？（万円）`,
+    question: (answers) => `「${answers['Q2-5']}」の単価はいくらですか？（円）`,
     type: 'number',
     priority: 1,
     category: '商品・サービス',
     validation: {
       required: true,
       min: 1,
-      max: 100000,
+      max: 1000000,
       isInteger: true,
-      errorMessage: '1〜100000の整数で入力してください（万円単位）'
+      errorMessage: '1〜1000000の整数で入力してください（円単位）'
     },
-    inputHint: '例：300（万円）',
+    inputHint: '例：800（円）',
+    helpText: '円単位で入力してください',
     nextQuestion: (answer, answers) => 'Q2-7'
   },
 
   {
     id: 'Q2-7',
-    question: (answers) => `「${answers['Q2-5']}」の売上構成比は何%ですか？`,
-    type: 'number',
+    question: (answers) => `「${answers['Q2-5']}」が売れている理由は何だと思いますか？`,
+    type: 'textarea',
     priority: 1,
     category: '商品・サービス',
     validation: {
       required: true,
-      min: 1,
-      max: 100,
-      isInteger: true,
-      errorMessage: '1〜100の整数で入力してください'
+      minLength: 10,
+      maxLength: 300,
+      errorMessage: '10文字以上300文字以内で入力してください'
     },
-    inputHint: '例：25（%）',
-    nextQuestion: (answer, answers) => 'Q2-8'
-  },
-
-  {
-    id: 'Q2-8',
-    question: (answers) => {
-      const customerQ = getCustomerQuestion(answers, answers['Q2-5']);
-      return customerQ.question;
-    },
-    type: 'text',
-    priority: 1,
-    category: '商品・サービス',
-    validation: {
-      required: true,
-      minLength: 2,
-      maxLength: 200,
-      errorMessage: '2文字以上200文字以内で入力してください'
-    },
-    examples: (answers) => {
-      const customerQ = getCustomerQuestion(answers, answers['Q2-5']);
-      return customerQ.examples;
-    },
-    inputHint: (answers) => {
-      const customerQ = getCustomerQuestion(answers, answers['Q2-5']);
-      return customerQ.inputHint;
-    },
+    inputHint: '例：手軽に購入でき、追加注文が多いから',
+    examples: [
+      '手軽に購入でき、追加注文が多いから',
+      'セット購入されることが多いから',
+      '季節限定で人気があるから'
+    ],
     nextQuestion: (answer, answers) => 'Q2-9'
   },
 
   // 3位の製品・サービス
   {
     id: 'Q2-9',
-    question: '売上構成で3番目に大きい製品・サービスのカテゴリーは何ですか？\n\n※ ない場合は「なし」と入力してください',
+    question: '3番目に人気の商品・サービスは何ですか？\n\n※ ない場合は「なし」と入力してください',
     type: 'text',
     priority: 1,
     category: '商品・サービス',
@@ -198,7 +157,7 @@ export const conversationalQuestionsStep2 = [
     ],
     nextQuestion: (answer, answers) => {
       if (answer === 'なし' || answer === 'ない') {
-        return 'Q2-13'; // 顧客層の質問へ
+        return 'Q2-12-sales'; // 売上・利益の質問へ
       }
       return 'Q2-10';
     }
@@ -206,61 +165,335 @@ export const conversationalQuestionsStep2 = [
 
   {
     id: 'Q2-10',
-    question: (answers) => `「${answers['Q2-9']}」の年間売上高はいくらですか？（万円）`,
+    question: (answers) => `「${answers['Q2-9']}」の単価はいくらですか？（円）`,
     type: 'number',
     priority: 1,
     category: '商品・サービス',
     validation: {
       required: true,
       min: 1,
-      max: 100000,
+      max: 1000000,
       isInteger: true,
-      errorMessage: '1〜100000の整数で入力してください（万円単位）'
+      errorMessage: '1〜1000000の整数で入力してください（円単位）'
     },
-    inputHint: '例：200（万円）',
+    inputHint: '例：500（円）',
+    helpText: '円単位で入力してください',
     nextQuestion: (answer, answers) => 'Q2-11'
   },
 
   {
     id: 'Q2-11',
-    question: (answers) => `「${answers['Q2-9']}」の売上構成比は何%ですか？`,
-    type: 'number',
+    question: (answers) => `「${answers['Q2-9']}」が売れている理由は何だと思いますか？`,
+    type: 'textarea',
     priority: 1,
     category: '商品・サービス',
     validation: {
       required: true,
-      min: 1,
-      max: 100,
-      isInteger: true,
-      errorMessage: '1〜100の整数で入力してください'
+      minLength: 10,
+      maxLength: 300,
+      errorMessage: '10文字以上300文字以内で入力してください'
     },
-    inputHint: '例：15（%）',
-    nextQuestion: (answer, answers) => 'Q2-12'
+    inputHint: '例：食後のデザートとして注文されることが多い',
+    examples: [
+      '食後のデザートとして注文されることが多い',
+      '女性客に人気がある',
+      '利益率が高い商品だから'
+    ],
+    nextQuestion: (answer, answers) => 'Q2-12-sales'
   },
 
+  // ===== 売上・利益の推移 =====
+
+  // 今期予想売上
   {
-    id: 'Q2-12',
+    id: 'Q2-12-sales-current',
     question: (answers) => {
-      const customerQ = getCustomerQuestion(answers, answers['Q2-9']);
-      return customerQ.question;
+      const openingDate = new Date(answers['Q1-5']);
+      const today = new Date();
+      const yearsSinceOpening = ((today - openingDate) / (1000 * 60 * 60 * 24 * 365));
+
+      if (yearsSinceOpening < 1) {
+        return '次に、売上について伺います。\n\n今期の実績売上はいくらですか？（これまでの累計）';
+      } else {
+        return '次に、売上について伺います。\n\n今期の予想売上はいくらですか？';
+      }
     },
-    type: 'text',
+    type: 'number',
     priority: 1,
-    category: '商品・サービス',
+    category: '売上・利益',
+    suffix: '万円',
+    placeholder: '例：800',
     validation: {
       required: true,
-      minLength: 2,
-      maxLength: 200,
-      errorMessage: '2文字以上200文字以内で入力してください'
+      min: 0,
+      max: 100000,
+      errorMessage: '0〜100000万円の範囲で入力してください'
     },
-    examples: (answers) => {
-      const customerQ = getCustomerQuestion(answers, answers['Q2-9']);
-      return customerQ.examples;
+    helpText: (answers) => {
+      const businessType = answers['Q1-6'];
+      const yearsSinceOpening = ((new Date() - new Date(answers['Q1-5'])) / (1000 * 60 * 60 * 24 * 365));
+
+      if (yearsSinceOpening < 1) {
+        return '💡 開業からこれまでの売上累計を入力してください。\n万円単位で入力（例：売上500万円の場合は「500」）';
+      } else if (businessType === '法人') {
+        return '💡 法人の場合は決算書の数値を参照してください。\n万円単位で入力（例：売上500万円の場合は「500」）';
+      } else {
+        return '💡 個人事業主の場合は確定申告書の数値を参照してください。\n万円単位で入力（例：売上500万円の場合は「500」）';
+      }
     },
-    inputHint: (answers) => {
-      const customerQ = getCustomerQuestion(answers, answers['Q2-9']);
-      return customerQ.inputHint;
+    nextQuestion: (answer, answers) => {
+      const yearsSinceOpening = ((new Date() - new Date(answers['Q1-5'])) / (1000 * 60 * 60 * 24 * 365));
+      if (yearsSinceOpening >= 1) {
+        return 'Q2-12-sales-1year';
+      } else {
+        return 'Q2-12-sales-forecast';
+      }
+    }
+  },
+
+  // 今期予想売上（開業1年未満の場合）
+  {
+    id: 'Q2-12-sales-forecast',
+    question: '今期の予想売上はいくらですか？（年間見込み）',
+    type: 'number',
+    priority: 1,
+    category: '売上・利益',
+    suffix: '万円',
+    placeholder: '例：1200',
+    condition: (answers) => {
+      const yearsSinceOpening = ((new Date() - new Date(answers['Q1-5'])) / (1000 * 60 * 60 * 24 * 365));
+      return yearsSinceOpening < 1;
     },
+    validation: {
+      required: true,
+      min: 0,
+      max: 100000,
+      errorMessage: '0〜100000万円の範囲で入力してください'
+    },
+    helpText: '💡 1年間の売上見込み額を入力してください。',
+    nextQuestion: (answer, answers) => 'Q2-12-profit-current'
+  },
+
+  // 1期前の売上
+  {
+    id: 'Q2-12-sales-1year',
+    question: '前期（1期前）の売上はいくらでしたか？',
+    type: 'number',
+    priority: 1,
+    category: '売上・利益',
+    suffix: '万円',
+    placeholder: '例：750',
+    condition: (answers) => {
+      const yearsSinceOpening = ((new Date() - new Date(answers['Q1-5'])) / (1000 * 60 * 60 * 24 * 365));
+      return yearsSinceOpening >= 1;
+    },
+    validation: {
+      required: true,
+      min: 0,
+      max: 100000,
+      errorMessage: '0〜100000万円の範囲で入力してください'
+    },
+    helpText: '💡 前期の決算書または確定申告書を参照してください。',
+    nextQuestion: (answer, answers) => {
+      const yearsSinceOpening = ((new Date() - new Date(answers['Q1-5'])) / (1000 * 60 * 60 * 24 * 365));
+      if (yearsSinceOpening >= 2) {
+        return 'Q2-12-sales-2year';
+      } else {
+        return 'Q2-12-profit-current';
+      }
+    }
+  },
+
+  // 2期前の売上
+  {
+    id: 'Q2-12-sales-2year',
+    question: '2期前の売上はいくらでしたか？',
+    type: 'number',
+    priority: 1,
+    category: '売上・利益',
+    suffix: '万円',
+    placeholder: '例：700',
+    condition: (answers) => {
+      const yearsSinceOpening = ((new Date() - new Date(answers['Q1-5'])) / (1000 * 60 * 60 * 24 * 365));
+      return yearsSinceOpening >= 2;
+    },
+    validation: {
+      required: true,
+      min: 0,
+      max: 100000,
+      errorMessage: '0〜100000万円の範囲で入力してください'
+    },
+    helpText: '💡 2期前の決算書または確定申告書を参照してください。',
+    nextQuestion: (answer, answers) => {
+      const yearsSinceOpening = ((new Date() - new Date(answers['Q1-5'])) / (1000 * 60 * 60 * 24 * 365));
+      if (yearsSinceOpening >= 3) {
+        return 'Q2-12-sales-3year';
+      } else {
+        return 'Q2-12-profit-current';
+      }
+    }
+  },
+
+  // 3期前の売上
+  {
+    id: 'Q2-12-sales-3year',
+    question: '3期前の売上はいくらでしたか？',
+    type: 'number',
+    priority: 1,
+    category: '売上・利益',
+    suffix: '万円',
+    placeholder: '例：650',
+    condition: (answers) => {
+      const yearsSinceOpening = ((new Date() - new Date(answers['Q1-5'])) / (1000 * 60 * 60 * 24 * 365));
+      return yearsSinceOpening >= 3;
+    },
+    validation: {
+      required: true,
+      min: 0,
+      max: 100000,
+      errorMessage: '0〜100000万円の範囲で入力してください'
+    },
+    helpText: '💡 3期前の決算書または確定申告書を参照してください。',
+    nextQuestion: (answer, answers) => 'Q2-12-profit-current'
+  },
+
+  // 今期予想経常利益
+  {
+    id: 'Q2-12-profit-current',
+    question: (answers) => {
+      const yearsSinceOpening = ((new Date() - new Date(answers['Q1-5'])) / (1000 * 60 * 60 * 24 * 365));
+
+      if (yearsSinceOpening < 1) {
+        return '次に、経常利益について伺います。\n\n今期の実績経常利益はいくらですか？（これまでの累計）\n\n※ 赤字の場合はマイナスで入力してください';
+      } else {
+        return '次に、経常利益について伺います。\n\n今期の予想経常利益はいくらですか？\n\n※ 赤字の場合はマイナスで入力してください';
+      }
+    },
+    type: 'number',
+    priority: 1,
+    category: '売上・利益',
+    suffix: '万円',
+    placeholder: '例：120（赤字の場合は-50）',
+    validation: {
+      required: true,
+      min: -10000,
+      max: 10000,
+      errorMessage: '-10000〜10000万円の範囲で入力してください'
+    },
+    helpText: '💡 経常利益 = 売上 - 経費（人件費、家賃、仕入れ等）\nおおよその金額で構いません。',
+    nextQuestion: (answer, answers) => {
+      const yearsSinceOpening = ((new Date() - new Date(answers['Q1-5'])) / (1000 * 60 * 60 * 24 * 365));
+      if (yearsSinceOpening >= 1) {
+        return 'Q2-12-profit-1year';
+      } else {
+        return 'Q2-12-profit-forecast';
+      }
+    }
+  },
+
+  // 今期予想経常利益（開業1年未満の場合）
+  {
+    id: 'Q2-12-profit-forecast',
+    question: '今期の予想経常利益はいくらですか？（年間見込み）\n\n※ 赤字の場合はマイナスで入力してください',
+    type: 'number',
+    priority: 1,
+    category: '売上・利益',
+    suffix: '万円',
+    placeholder: '例：150（赤字の場合は-50）',
+    condition: (answers) => {
+      const yearsSinceOpening = ((new Date() - new Date(answers['Q1-5'])) / (1000 * 60 * 60 * 24 * 365));
+      return yearsSinceOpening < 1;
+    },
+    validation: {
+      required: true,
+      min: -10000,
+      max: 10000,
+      errorMessage: '-10000〜10000万円の範囲で入力してください'
+    },
+    helpText: '💡 1年間の経常利益見込み額を入力してください。',
+    nextQuestion: (answer, answers) => 'Q2-13'
+  },
+
+  // 1期前の経常利益
+  {
+    id: 'Q2-12-profit-1year',
+    question: '前期（1期前）の経常利益はいくらでしたか？\n\n※ 赤字の場合はマイナスで入力してください',
+    type: 'number',
+    priority: 1,
+    category: '売上・利益',
+    suffix: '万円',
+    placeholder: '例：100（赤字の場合は-50）',
+    condition: (answers) => {
+      const yearsSinceOpening = ((new Date() - new Date(answers['Q1-5'])) / (1000 * 60 * 60 * 24 * 365));
+      return yearsSinceOpening >= 1;
+    },
+    validation: {
+      required: true,
+      min: -10000,
+      max: 10000,
+      errorMessage: '-10000〜10000万円の範囲で入力してください'
+    },
+    helpText: '💡 前期の決算書または確定申告書を参照してください。',
+    nextQuestion: (answer, answers) => {
+      const yearsSinceOpening = ((new Date() - new Date(answers['Q1-5'])) / (1000 * 60 * 60 * 24 * 365));
+      if (yearsSinceOpening >= 2) {
+        return 'Q2-12-profit-2year';
+      } else {
+        return 'Q2-13';
+      }
+    }
+  },
+
+  // 2期前の経常利益
+  {
+    id: 'Q2-12-profit-2year',
+    question: '2期前の経常利益はいくらでしたか？\n\n※ 赤字の場合はマイナスで入力してください',
+    type: 'number',
+    priority: 1,
+    category: '売上・利益',
+    suffix: '万円',
+    placeholder: '例：80（赤字の場合は-80）',
+    condition: (answers) => {
+      const yearsSinceOpening = ((new Date() - new Date(answers['Q1-5'])) / (1000 * 60 * 60 * 24 * 365));
+      return yearsSinceOpening >= 2;
+    },
+    validation: {
+      required: true,
+      min: -10000,
+      max: 10000,
+      errorMessage: '-10000〜10000万円の範囲で入力してください'
+    },
+    helpText: '💡 2期前の決算書または確定申告書を参照してください。',
+    nextQuestion: (answer, answers) => {
+      const yearsSinceOpening = ((new Date() - new Date(answers['Q1-5'])) / (1000 * 60 * 60 * 24 * 365));
+      if (yearsSinceOpening >= 3) {
+        return 'Q2-12-profit-3year';
+      } else {
+        return 'Q2-13';
+      }
+    }
+  },
+
+  // 3期前の経常利益
+  {
+    id: 'Q2-12-profit-3year',
+    question: '3期前の経常利益はいくらでしたか？\n\n※ 赤字の場合はマイナスで入力してください',
+    type: 'number',
+    priority: 1,
+    category: '売上・利益',
+    suffix: '万円',
+    placeholder: '例：60（赤字の場合は-100）',
+    condition: (answers) => {
+      const yearsSinceOpening = ((new Date() - new Date(answers['Q1-5'])) / (1000 * 60 * 60 * 24 * 365));
+      return yearsSinceOpening >= 3;
+    },
+    validation: {
+      required: true,
+      min: -10000,
+      max: 10000,
+      errorMessage: '-10000〜10000万円の範囲で入力してください'
+    },
+    helpText: '💡 3期前の決算書または確定申告書を参照してください。',
     nextQuestion: (answer, answers) => 'Q2-13'
   },
 

@@ -1,0 +1,34 @@
+  // 現在の質問を取得（回答済み質問を除外）
+  const getCurrentQuestion = () => {
+    // Step 1は対話型フローを使用
+    if (currentStep === 1) {
+      const nextQuestion = getNextStep1Question(answers);
+      console.log('[Conversational] Step 1 next question:', nextQuestion?.id || 'complete');
+
+      // Step 1完了チェック
+      if (!nextQuestion && isStep1Complete(answers)) {
+        console.log('[Conversational] Step 1 complete!');
+        return null; // Step 1完了
+      }
+
+      return nextQuestion;
+    }
+
+    // Step 2以降は従来のフロー
+    const questions = getStepQuestions(currentStep);
+    const answeredQuestions = Object.keys(answers).filter(qId =>
+      questions.some(q => q.id === qId)
+    );
+
+    console.log('getCurrentQuestion:', {
+      currentStep,
+      questions: questions.map(q => q.id),
+      answeredQuestions,
+      answers,
+      answersKeys: Object.keys(answers)
+    });
+
+    const nextQuestion = questions.find(q => !answeredQuestions.includes(q.id));
+    console.log('nextQuestion:', nextQuestion?.id || 'none');
+    return nextQuestion;
+  };

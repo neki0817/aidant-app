@@ -1,0 +1,462 @@
+/* 店舗プロフィール編集コンポーネント */
+
+.store-profile-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  min-height: 300px;
+}
+
+.store-profile-loading .spinner {
+  width: 50px;
+  height: 50px;
+  border: 4px solid #f3f3f3;
+  border-top: 4px solid #007bff;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.store-profile-loading p {
+  margin-top: 20px;
+  font-size: 16px;
+  color: #333;
+}
+
+.loading-sub {
+  font-size: 14px !important;
+  color: #666 !important;
+}
+
+.store-profile-error {
+  padding: 20px;
+  text-align: center;
+}
+
+.store-profile-error p {
+  color: #d32f2f;
+  margin-bottom: 15px;
+}
+
+/* メインコンテナ */
+.store-profile-editor {
+  background: #fff;
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  max-width: 700px;
+  margin: 20px auto;
+  max-height: 80vh;
+  overflow-y: auto;
+  position: relative;
+}
+
+.profile-title {
+  font-size: 24px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: #333;
+}
+
+.profile-subtitle {
+  font-size: 14px;
+  color: #666;
+  margin-bottom: 24px;
+}
+
+/* セクション */
+.profile-section {
+  margin-bottom: 28px;
+  border-bottom: 1px solid #e0e0e0;
+  padding-bottom: 20px;
+}
+
+.profile-section:last-of-type {
+  border-bottom: none;
+}
+
+.section-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #007bff;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+}
+
+.section-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* フィールド */
+.profile-field {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px;
+  border-radius: 8px;
+  transition: background-color 0.2s;
+}
+
+.profile-field:hover {
+  background-color: #f5f5f5;
+}
+
+.profile-field.editing {
+  background-color: #e3f2fd;
+}
+
+.field-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: #666;
+  min-width: 120px;
+}
+
+.field-value {
+  font-size: 16px;
+  color: #333;
+  flex: 1;
+  text-align: right;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.field-value:hover .edit-icon {
+  opacity: 1;
+}
+
+.edit-icon {
+  font-size: 14px;
+  opacity: 0.5;
+  transition: opacity 0.2s;
+}
+
+.edit-icon-small {
+  font-size: 12px;
+  opacity: 0.4;
+  margin-left: 4px;
+}
+
+/* 編集モード */
+.field-edit {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.field-edit input,
+.field-edit select {
+  width: 100%;
+  padding: 8px 12px;
+  border: 2px solid #007bff;
+  border-radius: 6px;
+  font-size: 16px;
+  outline: none;
+}
+
+.field-suffix {
+  margin-left: 8px;
+  color: #666;
+}
+
+.edit-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.btn-save,
+.btn-cancel {
+  padding: 6px 16px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-save {
+  background-color: #28a745;
+  color: white;
+}
+
+.btn-save:hover {
+  background-color: #218838;
+}
+
+.btn-cancel {
+  background-color: #6c757d;
+  color: white;
+}
+
+.btn-cancel:hover {
+  background-color: #5a6268;
+}
+
+/* リストフィールド */
+.list-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.list-item {
+  padding: 8px 12px;
+  border-radius: 6px;
+  background-color: #f8f9fa;
+  transition: background-color 0.2s;
+}
+
+.list-item:hover {
+  background-color: #e9ecef;
+}
+
+.list-item-view {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.list-bullet {
+  color: #007bff;
+  font-weight: bold;
+}
+
+.list-text {
+  flex: 1;
+  cursor: pointer;
+  font-size: 15px;
+  color: #333;
+}
+
+.list-text:hover {
+  color: #007bff;
+}
+
+.btn-remove {
+  padding: 2px 8px;
+  background-color: #dc3545;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  transition: background-color 0.2s;
+}
+
+.btn-remove:hover {
+  background-color: #c82333;
+}
+
+.list-item-edit {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.list-item-edit input {
+  flex: 1;
+  padding: 6px 10px;
+  border: 2px solid #007bff;
+  border-radius: 4px;
+  font-size: 15px;
+}
+
+.btn-save-small,
+.btn-cancel-small {
+  padding: 4px 12px;
+  border: none;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn-save-small {
+  background-color: #28a745;
+  color: white;
+}
+
+.btn-save-small:hover {
+  background-color: #218838;
+}
+
+.btn-cancel-small {
+  background-color: #6c757d;
+  color: white;
+}
+
+.btn-cancel-small:hover {
+  background-color: #5a6268;
+}
+
+.btn-add-item {
+  padding: 8px 16px;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  align-self: flex-start;
+}
+
+.btn-add-item:hover {
+  background-color: #0056b3;
+}
+
+/* 口コミハイライト */
+.review-highlights {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.highlight-badge {
+  padding: 6px 12px;
+  background-color: #fff3cd;
+  color: #856404;
+  border-radius: 16px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* 情報源 */
+.profile-source {
+  margin-top: 20px;
+  padding: 12px;
+  background-color: #e7f3ff;
+  border-left: 4px solid #007bff;
+  border-radius: 4px;
+  font-size: 13px;
+  color: #666;
+}
+
+/* アクションボタン */
+.profile-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #e0e0e0;
+}
+
+.btn-primary,
+.btn-secondary {
+  padding: 12px 24px;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-primary {
+  background-color: #007bff;
+  color: white;
+}
+
+.btn-primary:hover {
+  background-color: #0056b3;
+  box-shadow: 0 4px 8px rgba(0, 123, 255, 0.3);
+}
+
+.btn-secondary {
+  background-color: #f8f9fa;
+  color: #333;
+  border: 1px solid #dee2e6;
+}
+
+.btn-secondary:hover {
+  background-color: #e2e6ea;
+}
+
+/* レスポンシブ対応 */
+@media (max-width: 600px) {
+  .store-profile-editor {
+    padding: 16px;
+    margin: 10px;
+  }
+
+  .profile-field {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .field-value {
+    text-align: left;
+    justify-content: flex-start;
+  }
+
+  .field-label {
+    min-width: auto;
+  }
+
+  .profile-actions {
+    flex-direction: column-reverse;
+  }
+
+  .btn-primary,
+  .btn-secondary {
+    width: 100%;
+  }
+}
+
+.error-help {
+  color: #666 !important;
+  font-size: 14px;
+  margin-top: 10px !important;
+}
+
+.error-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  margin-top: 20px;
+}
+
+.error-actions button {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.error-actions .btn-secondary {
+  background: #e0e0e0;
+  color: #333;
+}
+
+.error-actions .btn-secondary:hover {
+  background: #d0d0d0;
+}
+
+.error-actions .btn-primary {
+  background: #007bff;
+  color: white;
+}
+
+.error-actions .btn-primary:hover {
+  background: #0056b3;
+}

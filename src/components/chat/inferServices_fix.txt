@@ -1,0 +1,80 @@
+const inferServicesFromPlaceTypes = (types, name) => {
+  // 店名からより具体的なヒントを得る（優先順位高）
+  if (name) {
+    const nameLower = name.toLowerCase();
+    
+    // ハンバーガー関連
+    if (nameLower.includes('burger') || nameLower.includes('ハンバーガ') || nameLower.includes('バーガー')) {
+      return 'ハンバーガー・ファストフード';
+    }
+    
+    // イタリア料理関連
+    if (nameLower.includes('italian') || nameLower.includes('イタリア') || 
+        nameLower.includes('pasta') || nameLower.includes('pizza') ||
+        nameLower.includes('wine') || nameLower.includes('bacchus') || nameLower.includes('ワイン')) {
+      return 'イタリア料理・ワイン販売';
+    }
+    
+    // カフェ関連
+    if (nameLower.includes('cafe') || nameLower.includes('coffee') || 
+        nameLower.includes('カフェ') || nameLower.includes('珈琲')) {
+      return 'カフェ・コーヒー';
+    }
+    
+    // 美容関連
+    if (nameLower.includes('salon') || nameLower.includes('サロン') || 
+        nameLower.includes('beauty') || nameLower.includes('美容')) {
+      return '美容・ヘアカット';
+    }
+    
+    // ラーメン関連
+    if (nameLower.includes('ramen') || nameLower.includes('ラーメン')) {
+      return 'ラーメン・麺類';
+    }
+    
+    // 寿司関連
+    if (nameLower.includes('sushi') || nameLower.includes('寿司') || nameLower.includes('すし')) {
+      return '寿司・和食';
+    }
+  }
+
+  // Google Maps types mapping（より具体的なtypeを優先）
+  const specificTypeMapping = {
+    'bakery': 'パン・焼き菓子販売',
+    'cafe': 'カフェ・軽食',
+    'bar': 'バー・飲料販売',
+    'meal_takeaway': 'テイクアウト料理',
+    'meal_delivery': 'デリバリー・配達',
+    'clothing_store': '衣類販売',
+    'shoe_store': '靴販売',
+    'jewelry_store': 'ジュエリー販売',
+    'beauty_salon': '美容・ヘアカット',
+    'hair_care': 'ヘアケア・美容',
+    'spa': 'エステ・スパ',
+    'gym': 'フィットネス・トレーニング',
+    'hardware_store': '工具・建築資材販売',
+    'florist': '花・フラワーアレンジメント',
+    'book_store': '書籍・雑誌販売',
+    'pet_store': 'ペット用品販売',
+    'liquor_store': '酒類販売'
+  };
+
+  // 具体的なtypeから先にチェック
+  for (const type of types) {
+    if (specificTypeMapping[type]) {
+      return specificTypeMapping[type];
+    }
+  }
+
+  // 一般的なrestaurantの場合は汎用的な表現を使用
+  if (types.includes('restaurant') || types.includes('food')) {
+    return '飲食・料理提供';
+  }
+
+  // storeの場合
+  if (types.includes('store')) {
+    return '商品販売';
+  }
+
+  return null;
+};

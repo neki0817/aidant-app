@@ -1,0 +1,92 @@
+    // Step 2も対話型フローを使用
+    if (currentStep === 2) {
+      // 最初の質問がまだ回答されていない場合
+      if (!answers['Q2-1']) {
+        const firstQuestion = getFirstStep2Question();
+        console.log('[Conversational] Step 2 first question:', firstQuestion?.id);
+        return {
+          id: firstQuestion.id,
+          text: typeof firstQuestion.question === 'function' ? firstQuestion.question(answers) : firstQuestion.question,
+          type: firstQuestion.type,
+          options: firstQuestion.options,
+          validation: firstQuestion.validation,
+          examples: firstQuestion.examples,
+          inputHint: firstQuestion.inputHint,
+          helpText: firstQuestion.helpText
+        };
+      }
+
+      // 最後に回答した質問を探す
+      const allAnsweredQ2 = Object.keys(answers)
+        .filter(qId => qId.startsWith('Q2-'))
+        .sort((a, b) => {
+          // Q2-1, Q2-2, Q2-3-multi などを数値部分でソート
+          const parseQId = (qId) => {
+            const match = qId.match(/Q2-(\d+)(?:-(.+))?/);
+            if (!match) return [0, ''];
+            return [parseInt(match[1], 10), match[2] || ''];
+          };
+          
+          const [aNum, aSuffix] = parseQId(a);
+          const [bNum, bSuffix] = parseQId(b);
+          
+          if (aNum !== bNum) {
+            return aNum - bNum;
+          }
+          
+          // 同じ番号の場合はサフィックスで比較
+          return aSuffix.localeCompare(bSuffix);
+        });
+      
+      console.log('[Step 2] All answered Q2 questions (sorted):', allAnsweredQ2);
+      
+      if (allAnsweredQ2.length === 0) {
+        const firstQuestion = getFirstStep2Question();
+        return {
+          id: firstQuestion.id,
+          text: typeof firstQuestion.question === 'function' ? firstQuestion.question(answers) : firstQuestion.question,
+          type: firstQuestion.type,
+          options: firstQuestion.options,
+          validation: firstQuestion.validation,
+          examples: firstQuestion.examples,
+          inputHint: firstQuestion.inputHint,
+          helpText: firstQuestion.helpText
+        };
+      }
+
+      // 最後に回答した質問IDを取得
+      const lastAnsweredQId = allAnsweredQ2[allAnsweredQ2.length - 1];
+      const lastAnswer = answers[lastAnsweredQId];
+      
+      console.log('[Step 2] Last answered question:', lastAnsweredQId, 'Answer:', lastAnswer);
+
+      // 次の質問を取得
+      const nextQuestion = getNextStep2Question(lastAnsweredQId, lastAnswer, answers);
+      console.log('[Conversational] Step 2 next question:', nextQuestion?.id || 'complete');
+
+      // Step 2完了チェック
+      if (!nextQuestion && isStep2Complete(answers)) {
+        console.log('[Conversational] Step 2 complete!');
+        return null; // Step 2完了
+      }
+
+      if (nextQuestion) {
+        // 質問テキストが関数の場合は実行
+        const questionText = typeof nextQuestion.question === 'function'
+          ? nextQuestion.question(answers)
+          : nextQuestion.question;
+
+        return {
+          id: nextQuestion.id,
+          text: questionText,
+          type: nextQuestion.type,
+          options: nextQuestion.options,
+          validation: nextQuestion.validation,
+          examples: nextQuestion.examples,
+          inputHint: nextQuestion.inputHint,
+          helpText: nextQuestion.helpText
+        };
+      }
+
+      return null;
+    }

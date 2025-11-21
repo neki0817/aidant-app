@@ -3,14 +3,24 @@ import { useApplication } from '../../contexts/ApplicationContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePoints } from '../../hooks/usePoints';
 import { enhanceAnswer, generateAnswerDraft } from '../../services/openai/openai';
-import { generateAIQuestions, generateFollowUpQuestion } from '../../services/openai/aiQuestionGenerator';
-import { runAutonomousLoop, checkProgressAndSuggestNextFocus, runFinalCheck, resetAgentSession } from '../../services/ai/autonomousAgent';
-import { calculateOverallCompleteness, generateProgressSummary } from '../../services/ai/completionTracker';
-import { getNextStep1Question, isStep1Complete, getAutoAnswerFromGoogleMaps } from '../../services/ai/conversationalQuestionsStep1';
-import { isUserQuestion, answerUserQuestion } from '../../services/ai/conversationalFlow';
+import { generateAIQuestions } from '../../services/openai/aiQuestionGenerator';
+import { runAutonomousLoop } from '../../services/ai/autonomousAgent';
+import { calculateOverallCompleteness } from '../../services/ai/completionTracker';
+import { PHASE0_QUESTIONS, getNextPhase0Question, isPhase0Complete } from '../../services/ai/phase0Questions';
+import { STEP1_QUESTIONS, getNextStep1Question, isStep1Complete, getAutoAnswerFromGoogleMaps } from '../../services/ai/conversationalQuestionsStep1';
+import { isUserQuestion, answerUserQuestion, isAcknowledgment } from '../../services/ai/conversationalFlow';
 import { getFirstStep2Question, getNextStep2Question, isStep2Complete } from '../../services/ai/conversationalQuestionsStep2';
+import { getNextPhaseQuestion, isPhaseComplete, generateFollowUpQuestions, isFollowUpQuestion } from '../../services/ai/phaseHelpers';
+import { ConversationalPhase2Manager } from '../../services/ai/conversationalPhase2';
+import { ConversationalPhase3Manager } from '../../services/ai/conversationalPhase3';
 import { executeAutoAnalysis } from '../../services/ai/autoAnalysisHandler';
 import { executeFollowupAnalysis } from '../../services/ai/aiFollowupHandler';
+import { searchPlaceByText, getPlaceDetails } from '../../services/googleMaps/placesSearch';
+import { checkCompletenessAndDecideNext } from '../../services/aiAnalysis';
+import { fetchWebsiteData, detectUrlType } from '../../services/fetchWebsiteData';
+import { handleWebsiteUrl, handleGoogleMapsWebsite } from '../../services/websiteDataHandler';
+import { performMarketResearch } from '../../services/deepResearch';
+import { validateQ0_2Answer } from '../../services/validateQ0-2Service';
 import MessageBubble from './MessageBubble';
 import QuestionInput from './QuestionInput';
 import ProgressBar from './ProgressBar';
@@ -18,6 +28,11 @@ import CompletenessIndicator from './CompletenessIndicator';
 import ApplicationDocument from '../document/ApplicationDocument';
 import AiDraftOptions from './AiDraftOptions';
 import './ChatContainer.css';
+import StoreProfileEditor from './StoreProfileEditor';
+import FileUpload from './FileUpload';
+import ManualExpenseInput from './ManualExpenseInput';
+import AIExpenseEstimation from './AIExpenseEstimation';
+import SupplierTableInput from './SupplierTableInput';
 
 const ChatContainer = () => {
   const { currentUser: user } = useAuth();
@@ -26,6 +41,7 @@ const ChatContainer = () => {
     answers,
     setAnswers,
     updateAnswer,
+    updateMarketData,
     nextStep,
     prevStep,
     currentApplication,
@@ -45,10 +61,20 @@ const ChatContainer = () => {
   const [aiQuestionIndex, setAiQuestionIndex] = useState(0); // 現在のAI質問インデックス
   const [aiAnalysis, setAiAnalysis] = useState(''); // AI分析結果
 
+  // 深堀り質問用の状態
+  const [followUpQueue, setFollowUpQueue] = useState([]); // 深堀り質問キュー
+  const [currentFollowUpIndex, setCurrentFollowUpIndex] = useState(0); // 現在の深堀り質問インデックス
+
   // 完全自律AIエージェント用の状態
   const [autonomousMode, setAutonomousMode] = useState(true); // 自律モードON/OFF
   const [completenessScore, setCompletenessScore] = useState(0); // 完成度スコア
   const [showCompletenessDetails, setShowCompletenessDetails] = useState(false); // 完成度詳細表示
+
+  // Phase 2 会話形式マネージャー
+  const [phase2Manager, setPhase2Manager] = useState(null);
+
+  // Phase 3 会話形式マネージャー
+  const [phase3Manager, setPhase3Manager] = useState(null);
 
   const messagesEndRef = useRef(null);
 
@@ -59,7 +85,7 @@ const ChatContainer = () => {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [messages, currentQuestion]);
 
   // コンポーネント初期化
   useEffect(() => {
@@ -84,36 +110,34 @@ const ChatContainer = () => {
   // メッセージの初期化（一度だけ実行）
   useEffect(() => {
     if (currentApplication && messages.length === 0) {
+      // 最初に挨拶メッセージを表示（welcomeタイプで「始める」ボタン表示）
+      const welcomeQuestion = {
+        id: 'welcome',
+        type: 'welcome',
+        text: 'こんにちは！補助金AI申請アシスタントです🤖 小規模事業者持続化補助金の申請書を、私が対話形式でお手伝いします。\n\n所要時間は約20分です。途中で保存もできるので、ご安心ください。'
+      };
+
+      addAIMessage(welcomeQuestion.text, welcomeQuestion);
+      setCurrentQuestion(welcomeQuestion);
+    }
+  }, [currentApplication]);
+
+  // welcomeメッセージ後の最初の質問表示
+  useEffect(() => {
+    if (currentApplication && answers['welcome'] === 'started' && !currentQuestion) {
+      // welcomeが完了したら、最初の質問を表示
       const question = getCurrentQuestion();
       if (question) {
+        setCurrentQuestion(question);
         addAIMessage(question.text, question);
 
         // helpTextがあれば、別の吹き出しで表示
         if (question.helpText) {
           addAIMessage(question.helpText);
         }
-
-        // placeholderをGoogle Maps情報から動的生成
-        let placeholderText = question.placeholder;
-
-        // Q1-3の場合、Google Mapsの業種情報から例を生成
-        if (question.id === 'Q1-3' && answers['Q1-0']) {
-          const placeInfo = answers['Q1-0'];
-          if (placeInfo.types && placeInfo.types.length > 0) {
-            const serviceHint = inferServicesFromPlaceTypes(placeInfo.types, placeInfo.name);
-            if (serviceHint) {
-              placeholderText = `💡 Google Mapsの情報から「${serviceHint}」のようです。`;
-            }
-          }
-        }
-
-        // placeholderがあれば、例として表示
-        if (placeholderText) {
-          addAIMessage(placeholderText);
-        }
       }
     }
-  }, [currentApplication]);
+  }, [answers, currentApplication, currentQuestion]);
 
   // Step 4開始時にAI質問を生成
   useEffect(() => {
@@ -171,6 +195,18 @@ const ChatContainer = () => {
   useEffect(() => {
     console.log('useEffect triggered - currentStep:', currentStep, 'answers:', answers);
 
+    // welcomeが回答されていない場合は他の質問を設定しない
+    if (!answers['welcome']) {
+      console.log('[Welcome] Waiting for welcome answer');
+      return;
+    }
+
+    // 深堀り質問モード中は通常の質問取得をスキップ
+    if (followUpQueue.length > 0) {
+      console.log('[Follow-Up] Skipping normal question flow - in follow-up mode');
+      return;
+    }
+
     // Step 4の場合はAI質問を使用
     if (currentStep === 4 && aiQuestions.length > 0) {
       return; // AI質問モードでは通常の質問取得をスキップ
@@ -192,9 +228,154 @@ const ChatContainer = () => {
     const question = getCurrentQuestion();
     console.log('Setting currentQuestion to:', question?.id || 'null');
 
+    // AI質問生成フラグが立っている場合（Phase 2）
+    // Phase 2の会話形式マネージャーを初期化
+    // ⚠️ 最優先でチェック（他のどの処理よりも先に実行）
+    if (question && question.ai_generation === true && question.phase === 2) {
+      console.log('[Phase 2 Conversational] Initializing manager...');
+
+      if (!phase2Manager) {
+        const businessType = answers['Q1-1'] || '飲食業';
+        const manager = new ConversationalPhase2Manager(businessType, answers);
+        setPhase2Manager(manager);
+
+        setIsLoading(true);
+        addAIMessage('業種に合わせた質問を準備しています...');
+
+        // 最初の質問を生成
+        manager.startDataItemConversation()
+          .then(firstQuestion => {
+            setIsLoading(false);
+            if (firstQuestion) {
+              console.log('[Phase 2 Conversational] First question:', firstQuestion);
+              setCurrentQuestion(firstQuestion);
+              addAIMessage(firstQuestion.text, firstQuestion);
+            } else {
+              // エラー処理
+              console.error('[Phase 2 Conversational] Failed to generate first question');
+              addAIMessage('質問の生成に失敗しました。もう一度お試しください。');
+            }
+          })
+          .catch(error => {
+            setIsLoading(false);
+            console.error('[Phase 2 Conversational] Error:', error);
+            addAIMessage('エラーが発生しました。もう一度お試しください。');
+          });
+      } else {
+        // マネージャーは既に初期化済み（質問生成中）
+        console.log('[Phase 2 Conversational] Manager already initialized, waiting for questions...');
+      }
+
+      return; // これ以上の処理をスキップ
+    }
+
+    // AI質問生成フラグが立っている場合（Phase 3）
+    // Phase 3の会話形式マネージャーを初期化
+    if (question && question.ai_generation === true && question.phase === 3) {
+      console.log('[Phase 3 Conversational] Initializing manager...');
+
+      if (!phase3Manager) {
+        const businessType = answers['Q1-1'] || '飲食業';
+        const manager = new ConversationalPhase3Manager(businessType, answers);
+        setPhase3Manager(manager);
+
+        setIsLoading(true);
+        addAIMessage('あなたのお店の強みについて教えてください...');
+
+        // 最初の質問を生成
+        manager.getNextQuestion()
+          .then(firstQuestion => {
+            setIsLoading(false);
+            if (firstQuestion) {
+              console.log('[Phase 3 Conversational] First question:', firstQuestion);
+              setCurrentQuestion(firstQuestion);
+              addAIMessage(firstQuestion.text, firstQuestion);
+            } else {
+              // エラー処理
+              console.error('[Phase 3 Conversational] Failed to generate first question');
+              addAIMessage('質問の生成に失敗しました。もう一度お試しください。');
+            }
+          })
+          .catch(error => {
+            setIsLoading(false);
+            console.error('[Phase 3 Conversational] Error:', error);
+            addAIMessage('エラーが発生しました。もう一度お試しください。');
+          });
+      } else {
+        // マネージャーは既に初期化済み（質問生成中）
+        console.log('[Phase 3 Conversational] Manager already initialized, waiting for questions...');
+      }
+
+      return; // これ以上の処理をスキップ
+    }
+
     // 質問が変わった場合のみ更新
-    if (question && question.id !== currentQuestion?.id) {
+    if (question && question.id && question.id !== currentQuestion?.id) {
       setCurrentQuestion(question);
+
+      // autoProgressタイプの質問（welcome, ai_place_analysis, completion等）は自動的に次へ
+      if (question.autoProgress && question.type !== 'place_confirm') {
+        console.log('[Auto Progress] Detected auto-progress type:', question.type);
+        const messageText = question.generateMessage ? question.generateMessage(answers) : question.text;
+        addAIMessage(messageText, question);
+
+        // welcomeタイプの場合は自動進行させない（ユーザーが「次へ」ボタンを押すまで待つ）
+        if (question.type === 'welcome') {
+          return;
+        }
+
+        // completionタイプの場合は、メッセージ表示後にPhase遷移
+        if (question.type === 'completion') {
+          console.log('[Auto Progress] Completion type - advancing to next phase');
+          setTimeout(() => {
+            if (currentApplication) {
+              updateAnswer(question.id, 'auto_progressed');
+            }
+          }, 2000); // 2秒後にPhase遷移
+          return;
+        }
+
+        // ai_place_analysisタイプの場合、ディープリサーチを実行
+        if (question.type === 'ai_place_analysis') {
+          console.log('[Deep Research] Starting market research in background...');
+
+          // バックグラウンドでディープリサーチを実行（完了メッセージは後で表示）
+          performMarketResearch(answers, answers['Q1-0'])
+            .then(async (researchReport) => {
+              console.log('[Deep Research] Market research completed');
+
+              // 結果をFirestoreに保存
+              if (currentApplication) {
+                await updateMarketData(researchReport);
+                console.log('[Deep Research] Research data saved to Firestore');
+              }
+
+              // 完了メッセージは削除（Q1-1表示時に出す）
+            })
+            .catch(error => {
+              console.error('[Deep Research] Error:', error);
+              // エラー時のみメッセージ表示
+              addAIMessage('⚠️ 市場調査でエラーが発生しましたが、質問は続行します。');
+            });
+
+          // ディープリサーチは非同期で実行するため、すぐに次へ進む
+          setTimeout(() => {
+            if (currentApplication) {
+              updateAnswer(question.id, 'auto_progressed');
+            }
+          }, 1500);
+          return;
+        }
+
+        // その他のautoProgressタイプは自動的に次へ
+        setTimeout(() => {
+          if (currentApplication) {
+            updateAnswer(question.id, 'auto_progressed');
+          }
+        }, 1500);
+        return;
+      }
+
       // 自動分析タイプの質問の場合、即座に実行
       if (question.type === 'auto_analyze_competitors' || question.type === 'auto_analyze_reviews' || question.type === 'ai_followup_analysis') {
         console.log('[Auto Analysis] Detected auto analysis type:', question.type);
@@ -245,6 +426,11 @@ const ChatContainer = () => {
 
       // 最初の質問以外はチャットに表示
       if (Object.keys(answers).length > 0) {
+        // prependMessageがある場合は、質問の前にメッセージを表示
+        if (question.prependMessage) {
+          addAIMessage(question.prependMessage);
+        }
+
         addAIMessage(question.text, question);
 
         // Q1-3の場合、Google Mapsの業種情報から3段階で提示
@@ -260,20 +446,41 @@ const ChatContainer = () => {
               addAIMessage('この内容で問題なければそのまま送信、修正や追加がある場合は入力してください。');
             }
           }
-        } else if (question.placeholder) {
-          // 通常のplaceholder表示
-          addAIMessage(`💡 ${question.placeholder}`);
         }
+        // placeholderは入力フィールド内に表示されるため、別メッセージとして表示しない
       }
     } else if (!question && Object.keys(answers).length > 0) {
       // 質問がなくなった（ステップ完了）
-      // Step 1完了の場合
-      if (currentStep === 1 && isStep1Complete(answers)) {
+      // Phase 0完了の場合
+      if (currentStep === 0 && isPhase0Complete(answers)) {
+        console.log('[Phase 0] Phase complete - moving to Phase 1');
         setCurrentQuestion(null);
         handleStepComplete();
       }
-      // Step 2完了の場合
-      else if (currentStep === 2 && isStep2Complete(answers)) {
+      // Step 1完了の場合
+      else if (currentStep === 1 && isStep1Complete(answers)) {
+        setCurrentQuestion(null);
+        handleStepComplete();
+      }
+      // Phase 2-4完了の場合
+      else if (currentStep >= 2 && currentStep <= 4 && isPhaseComplete(currentStep, answers)) {
+        console.log(`[Phase ${currentStep}] Phase complete - moving to next step`);
+        setCurrentQuestion(null);
+        handleStepComplete();
+      }
+      // Phase 5完了の場合、AI分析を実行してから次へ進む
+      else if (currentStep === 5 && isPhaseComplete(5, answers) && !isPhaseComplete(6, answers)) {
+        console.log(`[Phase 5] Phase complete - running AI completeness analysis`);
+        handlePhase5Complete();
+      }
+      // Phase 6完了の場合、申請書生成へ
+      else if (currentStep === 5 && isPhaseComplete(5, answers) && isPhaseComplete(6, answers)) {
+        console.log(`[Phase 6] Phase complete - ready to generate application`);
+        setCurrentQuestion(null);
+        handleStepComplete();
+      }
+      // Step 6（旧Step 2）完了の場合
+      else if (currentStep === 6 && isStep2Complete(answers)) {
         setCurrentQuestion(null);
         handleStepComplete();
       }
@@ -318,8 +525,66 @@ const ChatContainer = () => {
       answer,
       timestamp: new Date()
     };
-    
+
     setMessages(prev => [...prev, message]);
+  };
+
+  // AI提案メッセージを追加（2つの吹き出しで表示）
+  const addAISuggestion = (suggestion) => {
+    if (!suggestion) return;
+
+    // 1つ目の吹き出し: 提案内容
+    const suggestionMessage = {
+      id: `ai-suggestion-${Date.now()}-${Math.random()}`,
+      type: 'ai',
+      text: `💡 ${suggestion}`,
+      isSuggestion: true,
+      timestamp: new Date()
+    };
+
+    // 2つ目の吹き出し: コピー案内
+    const instructionMessage = {
+      id: `ai-instruction-${Date.now()}-${Math.random()}`,
+      type: 'ai',
+      text: '上記をコピーして使うこともできます。',
+      timestamp: new Date()
+    };
+
+    // 2つのメッセージを順番に追加
+    setMessages(prev => [...prev, suggestionMessage, instructionMessage]);
+  };
+
+  // currentQuestionが変わったときにAI提案を表示
+  useEffect(() => {
+    if (currentQuestion && currentQuestion.generateSuggestion && typeof currentQuestion.generateSuggestion === 'function') {
+      try {
+        const suggestion = currentQuestion.generateSuggestion(answers);
+        console.log('[AI Suggestion] Question:', currentQuestion.id, 'Suggestion:', suggestion);
+        if (suggestion) {
+          addAISuggestion(suggestion);
+        }
+      } catch (error) {
+        console.error('[AI Suggestion] Error:', error);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentQuestion?.id]); // currentQuestion.idが変わったときのみ実行
+
+  // 質問とAI提案を表示する共通関数
+  const showQuestionWithSuggestion = (question) => {
+    if (!question) return;
+
+    // AI提案を生成して表示
+    if (question.generateSuggestion && typeof question.generateSuggestion === 'function') {
+      const suggestion = question.generateSuggestion(answers);
+      if (suggestion) {
+        addAISuggestion(suggestion);
+      }
+    }
+
+    // 質問を表示
+    setCurrentQuestion(question);
+    addAIMessage(question.text, question);
   };
 
   // 回答を処理
@@ -336,6 +601,167 @@ const ChatContainer = () => {
       console.error('Application is null - cannot process answer');
       addAIMessage('申請書の初期化中です。しばらくお待ちください。');
       return;
+    }
+
+    // 深堀り質問に対する回答の場合
+    if (isFollowUpQuestion(questionId) && followUpQueue.length > 0) {
+      console.log('[Follow-Up] Handling follow-up answer:', {
+        questionId,
+        currentIndex: currentFollowUpIndex,
+        totalFollowUps: followUpQueue.length
+      });
+
+      try {
+        setIsLoading(true);
+
+        // ユーザーメッセージを追加
+        const answerText = formatAnswerText(questionId, answer);
+        addUserMessage(answerText, answer);
+
+        // 回答を保存（深堀り質問はポイント消費なし）
+        await updateAnswer(questionId, answer);
+
+        // 簡単な確認メッセージ
+        addAIMessage(`了解です。`);
+
+        // 次の深堀り質問へ進む、または通常フローに戻る
+        const nextIndex = currentFollowUpIndex + 1;
+        console.log('[Follow-Up] Next index check:', {
+          nextIndex,
+          totalFollowUps: followUpQueue.length,
+          hasMore: nextIndex < followUpQueue.length
+        });
+
+        if (nextIndex < followUpQueue.length) {
+          // まだ深堀り質問がある場合
+          console.log('[Follow-Up] Moving to next follow-up question:', followUpQueue[nextIndex].id);
+          setCurrentFollowUpIndex(nextIndex);
+          const nextFollowUp = followUpQueue[nextIndex];
+          setCurrentQuestion(nextFollowUp);
+          addAIMessage(nextFollowUp.text, nextFollowUp);
+        } else {
+          // 全ての深堀り質問が完了 - 通常フローに戻る
+          console.log('[Follow-Up] All follow-up questions completed - returning to normal flow');
+          console.log('[Follow-Up] Current step:', currentStep);
+          console.log('[Follow-Up] Current answers:', Object.keys(answers));
+          console.log('[Follow-Up] Last answered question:', questionId);
+          addAIMessage('ありがとうございます。次の質問に進みますね。');
+
+          // 深堀りモードを解除
+          setFollowUpQueue([]);
+          setCurrentFollowUpIndex(0);
+
+          // 次の本質問を取得して表示
+          console.log('[Follow-Up] Getting next main question...');
+          console.log('[Follow-Up] Calling getCurrentQuestion()...');
+          const nextQuestion = getCurrentQuestion();
+          console.log('[Follow-Up] Next question:', nextQuestion);
+          console.log('[Follow-Up] Next question ID:', nextQuestion ? nextQuestion.id : 'null');
+
+          if (nextQuestion) {
+            setCurrentQuestion(nextQuestion);
+            addAIMessage(nextQuestion.text, nextQuestion);
+          } else {
+            // 質問がない場合はPhase完了チェック
+            console.log('[Follow-Up] No more questions - checking if Phase is complete');
+            setCurrentQuestion(null);
+
+            // Phase 2-5の完了をチェック
+            if (currentStep >= 2 && currentStep <= 5 && isPhaseComplete(currentStep, answers)) {
+              console.log(`[Follow-Up] Phase ${currentStep} is complete - advancing to next step`);
+              handleStepComplete();
+            }
+          }
+        }
+
+        setIsLoading(false);
+        return; // 深堀り質問モードでは以降の処理をスキップ
+      } catch (error) {
+        console.error('[Follow-Up] Error handling answer:', error);
+        addAIMessage('回答の保存に失敗しました。もう一度お試しください。');
+        setIsLoading(false);
+        return;
+      }
+    }
+
+    // AI生成追加質問に対する回答の場合（Phase 5完了後）
+    if (questionId.startsWith('AI-F') && currentQuestion && currentQuestion.isAIGenerated) {
+      console.log('[AI Follow-Up] Handling AI-generated follow-up answer:', {
+        questionId,
+        targetSection: currentQuestion.targetSection,
+        targetGap: currentQuestion.targetGap
+      });
+
+      try {
+        setIsLoading(true);
+
+        // ユーザーメッセージを追加
+        const answerText = formatAnswerText(questionId, answer);
+        addUserMessage(answerText, answer);
+
+        // 回答を保存（AI追加質問はポイント消費なし）
+        await updateAnswer(questionId, answer);
+
+        addAIMessage('ありがとうございます。回答を分析しています...');
+
+        // 再度完成度をチェック
+        const placeData = answers['Q1-0'] || {};
+        const analysisData = aiAnalysis ? JSON.parse(aiAnalysis) : null;
+
+        // 前回の gaps から今回回答した gap を除外
+        const remainingGaps = analysisData?.gaps?.filter(
+          gap => gap.gap !== currentQuestion.targetGap
+        ) || [];
+
+        if (remainingGaps.length > 0) {
+          // まだ不足情報がある → 次のAI質問を生成
+          const { generateFollowUpQuestion } = await import('../../services/aiAnalysis');
+          const result = await generateFollowUpQuestion(remainingGaps, answers, placeData);
+
+          if (result.success) {
+            const aiQuestion = result.question;
+            const question = {
+              id: aiQuestion.id,
+              text: aiQuestion.text,
+              type: aiQuestion.type,
+              placeholder: aiQuestion.placeholder,
+              helpText: aiQuestion.helpText,
+              options: aiQuestion.options || undefined,
+              targetSection: aiQuestion.targetSection,
+              targetGap: aiQuestion.targetGap,
+              isAIGenerated: true
+            };
+
+            setCurrentQuestion(question);
+            addAIMessage(question.text, question);
+            if (question.helpText) {
+              addAIMessage(question.helpText);
+            }
+
+            // gaps を更新
+            setAiAnalysis(JSON.stringify({
+              completeness: analysisData?.completeness,
+              gaps: remainingGaps
+            }));
+          } else {
+            // AI質問生成失敗 → Phase 6へ
+            proceedToPhase6();
+          }
+        } else {
+          // 全ての不足情報を埋めた → Phase 6へ
+          addAIMessage('追加情報が揃いました！\n\n最後に、文章スタイルの確認に進みます。');
+          proceedToPhase6();
+        }
+
+        setIsLoading(false);
+        return; // AI追加質問モードでは以降の処理をスキップ
+      } catch (error) {
+        console.error('[AI Follow-Up] Error handling answer:', error);
+        addAIMessage('エラーが発生しました。Phase 6に進みます。');
+        proceedToPhase6();
+        setIsLoading(false);
+        return;
+      }
     }
 
     // Step 4のAI質問モードの場合の処理
@@ -394,7 +820,7 @@ const ChatContainer = () => {
     // Q2-6: 従業員数の上限チェック
     if (questionId === 'Q2-6') {
       const limit = getEmployeeLimit();
-      const employeeCount = answer;
+      const employeeCount = String(answer); // 文字列に変換
 
       // 従業員数を数値に変換
       let count = 0;
@@ -463,8 +889,360 @@ const ChatContainer = () => {
     try {
       setIsLoading(true);
 
+      // 【Google Maps検索】Q1-0（店舗名入力）の場合、Google Maps検索を実行
+      if (questionId === 'Q1-0' && typeof answer === 'string' && answer.trim().length > 0) {
+        console.log('[Google Maps Search] Searching for:', answer);
+
+        try {
+          // Google Maps検索を実行（複数候補を取得）
+          addAIMessage('Google Mapsで店舗情報を検索しています...');
+          const result = await searchPlaceByText(answer, true);
+
+          console.log('[Google Maps Search] Search result:', result);
+
+          // 複数候補がある場合、ユーザーに選択させる
+          if (result.multiple && result.candidates && result.candidates.length > 1) {
+            addAIMessage(`🔍 複数の候補が見つかりました。該当する店舗を選んでください：`);
+
+            // 候補を選択肢として表示（「該当なし」「手動入力」オプション追加）
+            const candidateOptions = result.candidates.map((candidate, index) => ({
+              value: candidate.place_id,
+              label: `${candidate.name}\n📍 ${candidate.address}${candidate.rating ? `\n⭐ ${candidate.rating} (${candidate.userRatingsTotal}件)` : ''}`
+            }));
+
+            // 「該当なし（再検索）」「手動で入力する」を追加
+            candidateOptions.push({
+              value: '__retry__',
+              label: '📝 該当なし（別の名前で再検索する）'
+            });
+            candidateOptions.push({
+              value: '__manual__',
+              label: '✏️ Google Mapsに情報がない（手動で入力する）'
+            });
+
+            const candidateQuestion = {
+              id: 'Q1-0-select',
+              text: '',
+              type: 'single_select',
+              options: candidateOptions
+            };
+
+            setCurrentQuestion(candidateQuestion);
+            addAIMessage('', candidateQuestion);
+            setIsLoading(false);
+            return;
+          }
+
+          // 単一の結果の場合
+          const placeData = result.multiple ? await getPlaceDetails(result.candidates[0].place_id) : result;
+          console.log('[Google Maps Search] Place data retrieved:', placeData);
+
+          // 検索結果を保存
+          await saveAnswer(questionId, placeData, 0);
+
+          // 検索成功メッセージ
+          addAIMessage(`✅ 店舗情報を取得しました！\n\n【${placeData.name}】\n📍 ${placeData.address}`);
+
+          // 次の質問を取得して表示
+          const nextQuestion = getCurrentQuestion();
+          if (nextQuestion) {
+            setCurrentQuestion(nextQuestion);
+            addAIMessage(nextQuestion.text, nextQuestion);
+          }
+
+          setIsLoading(false);
+          return;
+        } catch (error) {
+          console.error('[Google Maps Search] Error:', error);
+          addAIMessage(`❌ 店舗情報の取得に失敗しました\n\n${error.message}\n\n店舗名や住所を変えて、もう一度入力してください。`);
+          setIsLoading(false);
+          return;
+        }
+      }
+
+      // 【候補選択】Q1-0-select（複数候補から選択）の場合
+      if (questionId === 'Q1-0-select') {
+        console.log('[Google Maps Select] User selected:', answer);
+
+        // 「再検索」が選択された場合
+        if (answer === '__retry__') {
+          addAIMessage('では、別の店舗名や住所で再度検索します。\n\n例：「スターバックス 渋谷店」「東京都渋谷区○○」のように、より具体的に入力してください。');
+
+          // Q1-0に戻る
+          const q10Question = {
+            id: 'Q1-0',
+            text: 'あなたのお店や会社の名前を教えてください',
+            type: 'text',
+            placeholder: '例：スターバックス 渋谷店、東京都渋谷区○○'
+          };
+          setCurrentQuestion(q10Question);
+          addAIMessage('', q10Question);
+          setIsLoading(false);
+          return;
+        }
+
+        // 「手動入力」が選択された場合
+        if (answer === '__manual__') {
+          addAIMessage('承知しました。Google Mapsの情報がない場合は、手動で基本情報を入力していただきます。');
+
+          // Q1-0-manualに進む（手動入力フロー）
+          const manualQuestion = {
+            id: 'Q1-0-manual-name',
+            text: 'お店や会社の正式名称を教えてください',
+            type: 'text',
+            placeholder: '例：株式会社○○、○○商店'
+          };
+          setCurrentQuestion(manualQuestion);
+          addAIMessage(manualQuestion.text, manualQuestion);
+          setIsLoading(false);
+          return;
+        }
+
+        // 通常の候補選択（place_idが選ばれた場合）
+        try {
+          // Place IDから詳細情報を取得
+          addAIMessage('選択された店舗の詳細情報を取得しています...');
+          const placeData = await getPlaceDetails(answer);
+
+          console.log('[Google Maps Select] Place data retrieved:', placeData);
+
+          // Q1-0の回答として保存（Q1-0-selectではなく）
+          await saveAnswer('Q1-0', placeData, 0);
+
+          // 検索成功メッセージ
+          addAIMessage(`✅ 店舗情報を取得しました！\n\n【${placeData.name}】\n📍 ${placeData.address}`);
+
+          // 次の質問を取得して表示
+          const nextQuestion = getCurrentQuestion();
+          if (nextQuestion) {
+            setCurrentQuestion(nextQuestion);
+            addAIMessage(nextQuestion.text, nextQuestion);
+          }
+
+          setIsLoading(false);
+          return;
+        } catch (error) {
+          console.error('[Google Maps Select] Error:', error);
+          addAIMessage(`❌ 店舗情報の取得に失敗しました\n\n${error.message}`);
+          setIsLoading(false);
+          return;
+        }
+      }
+
+      // 【手動入力フロー】Q1-0-manual-name（店舗名手動入力）
+      if (questionId === 'Q1-0-manual-name') {
+        console.log('[Manual Input] Business name:', answer);
+
+        // 回答を保存（住所入力時に参照するため）
+        await saveAnswer(questionId, answer, 0);
+
+        const addressQuestion = {
+          id: 'Q1-0-manual-address',
+          text: '店舗・事務所の住所を教えてください',
+          type: 'text',
+          placeholder: '例：東京都渋谷区渋谷1-1-1'
+        };
+        setCurrentQuestion(addressQuestion);
+        addAIMessage(addressQuestion.text, addressQuestion);
+        setIsLoading(false);
+        return;
+      }
+
+      // 【手動入力フロー】Q1-0-manual-address（住所手動入力）
+      if (questionId === 'Q1-0-manual-address') {
+        console.log('[Manual Input] Address:', answer);
+
+        // 回答を保存
+        await saveAnswer(questionId, answer, 0);
+
+        // 次は営業日の質問
+        const openingDaysQuestion = {
+          id: 'Q1-0-manual-openingDays',
+          text: '営業日を教えてください（週何日営業していますか？）',
+          type: 'text',
+          placeholder: '例：週6日、毎日、月〜金曜日'
+        };
+        setCurrentQuestion(openingDaysQuestion);
+        addAIMessage(openingDaysQuestion.text, openingDaysQuestion);
+        setIsLoading(false);
+        return;
+      }
+
+      // 【手動入力フロー】Q1-0-manual-openingDays（営業日手動入力）
+      if (questionId === 'Q1-0-manual-openingDays') {
+        console.log('[Manual Input] Opening days:', answer);
+
+        // 回答を保存
+        await saveAnswer(questionId, answer, 0);
+
+        // 次は口コミ評価の質問
+        const ratingQuestion = {
+          id: 'Q1-0-manual-rating',
+          text: '口コミ評価はありますか？（Google Maps、食べログ等での評価）',
+          type: 'text',
+          placeholder: '例：★3.9 (169件)、評価なし'
+        };
+        setCurrentQuestion(ratingQuestion);
+        addAIMessage(ratingQuestion.text, ratingQuestion);
+        setIsLoading(false);
+        return;
+      }
+
+      // 【手動入力フロー】Q1-0-manual-rating（口コミ評価手動入力）
+      if (questionId === 'Q1-0-manual-rating') {
+        console.log('[Manual Input] Rating:', answer);
+
+        // 全ての手動入力データをまとめてplaceData形式で保存
+        const businessName = answers['Q1-0-manual-name'];
+        const address = answers['Q1-0-manual-address'];
+        const openingDays = answers['Q1-0-manual-openingDays'];
+        const rating = answer;
+
+        const manualPlaceData = {
+          place_id: null,
+          name: businessName,
+          address: address,
+          location: null,
+          rating: null,
+          userRatingsTotal: 0,
+          types: [],
+          openingHours: openingDays ? { weekday_text: [openingDays] } : null,
+          reviews: rating && rating !== '評価なし' ? [{ text: rating }] : [],
+          phoneNumber: null,
+          website: null,
+          photos: [],
+          isManualInput: true // 手動入力フラグ
+        };
+
+        // Q1-0の回答として保存
+        await saveAnswer('Q1-0', manualPlaceData, 0);
+
+        addAIMessage(`✅ 基本情報を登録しました！\n\n【${manualPlaceData.name}】\n📍 ${manualPlaceData.address}\n📅 ${openingDays}\n⭐ ${rating}`);
+
+        // Q1-0-analysisをスキップして、Q1-1に進む
+        // 手動入力の場合はGoogle Maps情報がないため、分析メッセージは不要
+        await saveAnswer('Q1-0-analysis', 'skipped', 0); // Q1-0-analysisをスキップ済みとしてマーク
+
+        // Q1-1（業種）の質問を表示
+        const nextQuestion = getCurrentQuestion();
+        if (nextQuestion && nextQuestion.id === 'Q1-1') {
+          setCurrentQuestion(nextQuestion);
+          addAIMessage(nextQuestion.text, nextQuestion);
+        }
+
+        setIsLoading(false);
+        return;
+      }
+
+      // 【店舗プロフィール】Q1-0-profile（店舗プロフィール確認）
+      if (questionId === 'Q1-0-profile') {
+        console.log('[Store Profile] Profile confirmed:', answer);
+
+        // プロフィール生成をスキップした場合（answer === null）
+        if (answer === null) {
+          console.log('[Store Profile] Profile generation skipped');
+          
+          // Q1-0-profileをスキップ済みとしてマーク
+          await saveAnswer(questionId, 'skipped', 0);
+          
+          addAIMessage('プロフィール生成をスキップしました。通常の質問に進みます。');
+          
+          // 次の質問を取得して表示
+          const nextQuestion = getCurrentQuestion();
+          if (nextQuestion) {
+            setTimeout(() => {
+              addAIMessage(nextQuestion.text, nextQuestion);
+              setCurrentQuestion(nextQuestion);
+            }, 100);
+          }
+          
+          setIsLoading(false);
+          return;
+        }
+
+        // プロフィールを保存
+        await saveAnswer(questionId, answer, 0);
+
+        // プロフィールから残りのPhase 1質問に自動入力
+        const { autoFillFromStoreProfile } = await import('./../../services/ai/conversationalQuestionsStep1');
+        const autoAnswers = autoFillFromStoreProfile(answer);
+
+        console.log('[Store Profile] Auto-filling answers:', autoAnswers);
+
+        // 自動入力された回答を一括保存
+        for (const [qId, qAnswer] of Object.entries(autoAnswers)) {
+          await saveAnswer(qId, qAnswer, 0);
+          setAnswers(prev => ({
+            ...prev,
+            [qId]: qAnswer
+          }));
+        }
+
+// 次の質問を取得
+        const nextQuestion = getCurrentQuestion();
+
+        // 確認メッセージを先に表示
+        addAIMessage(`✅ 店舗プロフィールを確認しました！\n\nいくつかの質問は自動入力しましたので、残りの質問に答えてください。`);
+
+        // 次の質問は少し遅延して表示（メッセージが先に表示されるようにする）
+        if (nextQuestion) {
+          setTimeout(() => {
+            addAIMessage(nextQuestion.text, nextQuestion);
+            setCurrentQuestion(nextQuestion);
+          }, 100);
+        }
+
+        setIsLoading(false);
+        return;
+      }
+
+      // 【相槌】ユーザーの相槌（「はい」「そうです」など）をチェック
+      if (typeof answer === 'string' && isAcknowledgment(answer)) {
+        console.log('[Conversational] User acknowledgment:', answer);
+
+        // ユーザーメッセージを表示
+        addUserMessage(answer, answer);
+
+        // 深堀り質問モード中の場合は次の深堀り質問へ
+        if (followUpQueue.length > 0 && currentFollowUpIndex + 1 < followUpQueue.length) {
+          const nextIndex = currentFollowUpIndex + 1;
+          setCurrentFollowUpIndex(nextIndex);
+          const nextFollowUp = followUpQueue[nextIndex];
+          setCurrentQuestion(nextFollowUp);
+          addAIMessage(nextFollowUp.text, nextFollowUp);
+          setIsLoading(false);
+          return;
+        }
+
+        // 深堀り質問がない場合は簡単な確認メッセージを表示して、回答を保存
+        addAIMessage('了解です。');
+
+        // Q1-0-website-checkで「はい」を選択した場合、説明メッセージを追加
+        if (questionId === 'Q1-0-website-check' && answer === 'はい') {
+          addAIMessage('💡 以下のようなURLが利用できます：\n\n【飲食店】食べログ、ぐるなび、ホットペッパーグルメ、公式HP、Instagram\n\n【美容室】ホットペッパービューティー、楽天ビューティー、公式HP、Instagram\n\n【小売・サービス】公式HP、Instagram、Facebook、ECサイト');
+        }
+
+        // 回答を保存（次の質問に進むため）
+        const questionCost = getQuestionCost(questionId);
+        await saveAnswer(questionId, answer, questionCost);
+
+        // saveAnswer後に次の質問を表示
+        const nextQuestion = getCurrentQuestion();
+        if (nextQuestion) {
+          showQuestionWithSuggestion(nextQuestion);
+          if (nextQuestion.helpText) {
+            addAIMessage(nextQuestion.helpText);
+          }
+        }
+
+        setIsLoading(false);
+        return;
+      }
+
       // 【対話型】ユーザーが質問しているかチェック
-      if (typeof answer === 'string' && isUserQuestion(answer)) {
+      // ただし、深堀り質問モード中は質問として解釈しない
+      const isInFollowUpMode = followUpQueue.length > 0;
+      if (typeof answer === 'string' && !isInFollowUpMode && isUserQuestion(answer)) {
         console.log('[Conversational] User is asking a question:', answer);
 
         // ユーザーの質問を表示
@@ -481,10 +1259,13 @@ const ChatContainer = () => {
 
       // ポイント消費チェック
       const questionCost = getQuestionCost(questionId);
+      console.log('[handleAnswer] Point check:', { questionCost, pointBalance, hasEnough: pointBalance >= questionCost });
+
       if (questionCost > 0) {
         const hasEnoughPoints = await checkPointBalance(questionCost);
         if (!hasEnoughPoints) {
-          addAIMessage('ポイントが不足しています。ポイントを購入してください。');
+          console.warn('[handleAnswer] Insufficient points!', { required: questionCost, current: pointBalance });
+          addAIMessage(`ポイントが不足しています。この質問には${questionCost}ポイント必要ですが、現在${pointBalance}ポイントしかありません。ポイントを購入してください。`);
           setIsLoading(false);
           return;
         }
@@ -503,60 +1284,9 @@ const ChatContainer = () => {
         answerLength: typeof answer === 'string' ? answer.length : 'N/A'
       });
 
-      // テキストエリアの回答はAIで補完
-      if (currentQ && currentQ.type === 'textarea' && typeof answer === 'string' && answer.length >= 5) {
-        try {
-          console.log('[Enhancement] Starting for:', {
-            questionId,
-            answerLength: answer.length,
-            answer: answer.substring(0, 50)
-          });
-
-          // Google Maps情報(Q1-0)または旧形式の店舗情報(Q2-0)を取得
-          const placeInfo = answers['Q1-0'] || answers['Q2-0'];
-
-          const context = {
-            storeName: placeInfo?.name,
-            storeAddress: placeInfo?.address,
-            philosophy: answers['Q2-5'],
-            // Google Mapsの口コミ情報を追加
-            rating: placeInfo?.rating,
-            userRatingsTotal: placeInfo?.userRatingsTotal,
-            reviews: placeInfo?.reviews, // 口コミテキスト配列
-            businessType: answers['Q1-1'] // 業種情報
-          };
-
-          addAIMessage('回答を補完しています...');
-
-          const enhancedText = await enhanceAnswer(questionId, currentQ.text, answer, context);
-
-          console.log('[Enhancement] Result:', {
-            hasEnhancement: !!enhancedText,
-            enhancedLength: enhancedText?.length || 0
-          });
-
-          if (enhancedText) {
-            // 補完された回答を3択UIで表示
-            addAIMessage(`AIが回答を補完しました。内容をご確認ください。`);
-            setAiDraft(enhancedText);
-            setShowAiOptions(true);
-            setPendingAnswer({ questionId, original: answer, enhanced: enhancedText });
-            setIsLoading(false);
-            return; // 確認待ちで一時停止
-          } else {
-            console.log('[Enhancement] No enhancement returned - proceeding with original');
-            // AI補完がない場合のみ保存
-            await saveAnswer(questionId, answer, questionCost);
-          }
-        } catch (error) {
-          console.error('Error enhancing answer:', error);
-          // エラーの場合は元の回答で続行
-          await saveAnswer(questionId, answer, questionCost);
-        }
-      } else {
-        // テキストエリア以外の質問は通常保存
-        await saveAnswer(questionId, answer, questionCost);
-      }
+      // AI補完機能は無効化（対話形式で深堀りするため）
+      // 全ての質問タイプで通常保存
+      await saveAnswer(questionId, answer, questionCost);
 
     } catch (error) {
       console.error('Error handling answer:', error);
@@ -572,19 +1302,221 @@ const ChatContainer = () => {
     try {
       console.log('Saving answer:', { questionId, answer, answerType: Array.isArray(answer) ? 'array' : typeof answer });
 
+      // 【深堀り質問】Phase 2-5の質問に対して、まず深堀り質問があるかチェック
+      let hasFollowUps = false;
+      if (currentStep >= 2 && currentStep <= 5 && !isFollowUpQuestion(questionId)) {
+        const updatedAnswers = { ...answers, [questionId]: answer };
+        const result = generateFollowUpQuestions(questionId, answer, updatedAnswers);
+
+        if (result && result.followUps && result.followUps.length > 0) {
+          console.log('[Follow-Up] Generated', result.followUps.length, 'follow-up questions');
+          hasFollowUps = true;
+
+          // 深堀り質問を先に設定（updateAnswerの前に）
+          setFollowUpQueue(result.followUps);
+          setCurrentFollowUpIndex(0);
+
+          // 確認メッセージと最初の深堀り質問を準備
+          const confirmMsg = result.confirmMessage;
+          const firstFollowUp = result.followUps[0];
+
+          // updateAnswerを実行
+          await updateAnswer(questionId, answer);
+
+          // ポイント消費
+          if (questionCost > 0) {
+            console.log('[saveAnswer] (Follow-up) Attempting to consume points:', { questionCost, questionId });
+            try {
+              await consumePoints(questionCost, `質問回答: ${questionId}`);
+              console.log('[saveAnswer] (Follow-up) Points consumed successfully');
+            } catch (error) {
+              console.error('[saveAnswer] (Follow-up) Failed to consume points:', error);
+              throw error;
+            }
+          } else {
+            console.log('[saveAnswer] (Follow-up) No point cost for this question:', questionId);
+          }
+
+          // 確認メッセージを表示
+          if (confirmMsg) {
+            addAIMessage(confirmMsg);
+          }
+
+          // 最初の深堀り質問を表示
+          setCurrentQuestion(firstFollowUp);
+          addAIMessage(firstFollowUp.text, firstFollowUp);
+          return; // 通常フローをスキップ
+        }
+      }
+
+      // 深堀り質問がない場合は通常の保存処理
       // updateAnswerがApplicationContext内でsetAnswersを呼び出す
+      // Q1-0-websiteの処理
+      // Q1-0uff08Google Mapsu691cu7d22uff09u306ewebsiteu30d5u30a3u30fcu30ebu30c9u3092u51e6u7406
+      if (questionId === "Q1-0" && answer && answer.website) {
+        await handleGoogleMapsWebsite(answer.website, updateAnswer, addAIMessage);
+      }
+
+      if (questionId === "Q1-0-website") {
+        await handleWebsiteUrl(answer, updateAnswer, addAIMessage);
+      }
+
+      // Q0-2: 購入・実施予定のものをAI判定
+      if (questionId === "Q0-2") {
+        console.log('[Q0-2 Validation] Starting AI validation...');
+
+        addAIMessage('回答内容を確認しています...');
+
+        const validationResult = await validateQ0_2Answer(answer, answers);
+
+        console.log('[Q0-2 Validation] Result:', validationResult);
+
+        // エラー判定（ウェブ関連費のみ、補助対象外など）
+        const errors = validationResult.issues?.filter(issue => issue.severity === 'error') || [];
+
+        if (errors.length > 0) {
+          // エラーがある場合は警告メッセージを表示して、回答をやり直させる
+          const errorMessages = errors.map(err => err.message).join('\n\n');
+          addAIMessage(`⚠️ 補助対象の確認\n\n${errorMessages}\n\nもう一度、内容を見直して入力してください。`);
+          setIsLoading(false);
+          return; // 回答を保存せずに終了
+        }
+
+        // 警告（回答が曖昧など）
+        const warnings = validationResult.issues?.filter(issue => issue.severity === 'warning') || [];
+
+        if (warnings.length > 0) {
+          const warningMessages = warnings.map(warn => warn.message).join('\n\n');
+          addAIMessage(`💡 ${warningMessages}`);
+        }
+
+        // 深掘り質問がある場合
+        if (validationResult.followUpQuestions && validationResult.followUpQuestions.length > 0) {
+          console.log('[Q0-2 Validation] Follow-up questions detected:', validationResult.followUpQuestions);
+
+          // 深掘り質問を順番に表示
+          for (const followUp of validationResult.followUpQuestions) {
+            addAIMessage(followUp.text);
+
+            const followUpQuestion = {
+              id: followUp.id,
+              text: followUp.text,
+              type: followUp.type || 'text',
+              placeholder: followUp.placeholder,
+              helpText: followUp.reason
+            };
+
+            setCurrentQuestion(followUpQuestion);
+            setIsLoading(false);
+            return; // 深掘り質問を待つ
+          }
+        }
+
+        // 問題なし
+        if (validationResult.isValid) {
+          addAIMessage('✅ 内容を確認しました。補助対象として問題ありません。');
+        }
+      }
+
       // answersが更新されると、useEffectが発火してcurrentQuestionが更新され、次の質問が表示される
       await updateAnswer(questionId, answer);
 
       // ポイント消費
       if (questionCost > 0) {
-        await consumePoints(questionCost, `質問回答: ${questionId}`);
+        console.log('[saveAnswer] Attempting to consume points:', { questionCost, questionId });
+        try {
+          await consumePoints(questionCost, `質問回答: ${questionId}`);
+          console.log('[saveAnswer] Points consumed successfully');
+        } catch (error) {
+          console.error('[saveAnswer] Failed to consume points:', error);
+          throw error;
+        }
+      } else {
+        console.log('[saveAnswer] No point cost for this question:', questionId);
+      }
+
+      // ⚠️ Phase 2の会話形式の場合
+      if (currentStep === 2 && phase2Manager) {
+        console.log('[Phase 2 Conversational] Saving answer to manager...');
+        setIsLoading(true);
+
+        try {
+          const nextQuestion = await phase2Manager.saveAnswer(questionId, answer);
+
+          // Phase 2完了チェック（nextQuestionがnullまたはisComplete()がtrue）
+          if (!nextQuestion || phase2Manager.isComplete()) {
+            // Phase 2完了
+            console.log('[Phase 2 Conversational] Complete!');
+            setCurrentQuestion(null);
+            addAIMessage('Phase 2が完了しました。次のステップに進みます。');
+            handleStepComplete();
+          } else if (nextQuestion) {
+            if (nextQuestion.isConfirmation) {
+              // 確認質問
+              console.log('[Phase 2 Conversational] Showing confirmation');
+              setCurrentQuestion(nextQuestion);
+              addAIMessage(nextQuestion.text, nextQuestion);
+            } else if (nextQuestion.isEdit) {
+              // 修正モード
+              console.log('[Phase 2 Conversational] Showing edit mode');
+              setCurrentQuestion(nextQuestion);
+              addAIMessage('修正内容を入力してください', nextQuestion);
+            } else {
+              // 通常の次の質問
+              console.log('[Phase 2 Conversational] Next question:', nextQuestion.id);
+
+              // 一度nullにしてから新しい質問を設定（React状態を強制リセット）
+              setCurrentQuestion(null);
+              setTimeout(() => {
+                setCurrentQuestion(nextQuestion);
+                addAIMessage(nextQuestion.text, nextQuestion);
+              }, 100);
+            }
+          }
+        } catch (error) {
+          console.error('[Phase 2 Conversational] Error:', error);
+          addAIMessage('エラーが発生しました。');
+        } finally {
+          setIsLoading(false);
+        }
+
+        return; // 処理終了
+      }
+
+      // ⚠️ Phase 3の会話形式の場合
+      if (currentStep === 3 && phase3Manager) {
+        console.log('[Phase 3 Conversational] Saving answer to manager...');
+        setIsLoading(true);
+
+        try {
+          const nextQuestion = await phase3Manager.saveAnswer(questionId, answer);
+
+          if (phase3Manager.isComplete()) {
+            // Phase 3完了
+            console.log('[Phase 3 Conversational] Complete!');
+            setCurrentQuestion(null);
+            addAIMessage('Phase 3が完了しました。次のステップに進みます。');
+            handleStepComplete();
+          } else if (nextQuestion) {
+            // 通常の次の質問
+            console.log('[Phase 3 Conversational] Next question:', nextQuestion.id);
+            setCurrentQuestion(nextQuestion);
+            addAIMessage(nextQuestion.text, nextQuestion);
+          }
+        } catch (error) {
+          console.error('[Phase 3 Conversational] Error:', error);
+          addAIMessage('エラーが発生しました。');
+        } finally {
+          setIsLoading(false);
+        }
+
+        return; // 処理終了
       }
 
       // 【完全自律AI】回答保存後、自律エージェントを起動
-      // ただし、Step 1は対話型フローを使用するため、自律エージェントはスキップ
-      if (currentStep === 1 || currentStep === 2) {
-        console.log('[Conversational Flow] Step 1 & 2 - Using conversational flow (autonomous AI disabled)');
+      // ただし、Step 1, 2, 3は対話型フローを使用するため、自律エージェントはスキップ
+      if (currentStep === 1 || currentStep === 2 || currentStep === 3) {
+        console.log('[Conversational Flow] Step 1, 2 & 3 - Using conversational flow (autonomous AI disabled)');
       } else if (autonomousMode && currentQuestion) {
         console.log('[Autonomous AI] Analyzing answer with autonomous agent...');
 
@@ -605,21 +1537,21 @@ const ChatContainer = () => {
           console.log('[ChatContainer] Processing agent action:', agentAction.action);
 
           if (agentAction.action === 'deep_dive' && agentAction.data) {
-            // 深堀り質問を表示
+            // 深堀り質問を表示（様式2作成に必要な情報を収集）
             console.log('[ChatContainer] Showing deep dive question:', agentAction.data);
             addAIMessage(agentAction.message);
             setCurrentQuestion(agentAction.data);
             addAIMessage(agentAction.data.text, agentAction.data);
             return; // 通常フローをスキップ
           } else if (agentAction.action === 'business_detail_question' && agentAction.data) {
-            // 業態・特性確認質問を表示
+            // 業態・特性確認質問を表示（様式2作成に必要な情報を収集）
             console.log('[ChatContainer] Showing business detail question:', agentAction.data);
             addAIMessage(agentAction.message);
             setCurrentQuestion(agentAction.data);
             addAIMessage(agentAction.data.text, agentAction.data);
             return; // 通常フローをスキップ
           } else if (agentAction.action === 'industry_question' && agentAction.data) {
-            // 業種別の深堀り質問を表示
+            // 業種別の深堀り質問を表示（様式2作成に必要な情報を収集）
             console.log('[ChatContainer] Showing industry question:', agentAction.data);
             addAIMessage(agentAction.message);
             setCurrentQuestion(agentAction.data);
@@ -634,11 +1566,11 @@ const ChatContainer = () => {
             console.log('[ChatContainer] Flagging high priority issue');
             addAIMessage(agentAction.message);
           } else if (agentAction.action === 'suggest_improvement') {
-            // 改善提案を表示
-            console.log('[ChatContainer] Suggesting improvement');
-            if (agentAction.message) {
-              addAIMessage(agentAction.message);
-            }
+            // 改善提案を表示（質問途中のAI補完は不要なのでコメントアウト）
+            console.log('[ChatContainer] Suggesting improvement (disabled)');
+            // if (agentAction.message) {
+            //   addAIMessage(agentAction.message);
+            // }
           } else if (agentAction.action === 'proceed') {
             console.log('[ChatContainer] Agent says proceed with normal flow');
           }
@@ -653,6 +1585,8 @@ const ChatContainer = () => {
           // エラーでも処理を続行
         }
       }
+
+      // 深堀り質問の処理は saveAnswer の最初で既に実行済み
 
     } catch (e) {
       console.error('saveAnswer failed:', e);
@@ -773,6 +1707,53 @@ const ChatContainer = () => {
 
   // 前の質問に戻る
   const handleGoBack = async () => {
+    // Phase 1の場合は対話型フローを使用
+    if (currentStep === 1) {
+      const answeredIds = Object.keys(answers);
+
+      if (answeredIds.length > 0) {
+        try {
+          setIsLoading(true);
+
+          // 最後の回答を削除
+          const lastQuestionId = answeredIds[answeredIds.length - 1];
+
+          // 削除する質問オブジェクトを取得
+          const questionToDelete = STEP1_QUESTIONS.find(q => q.id === lastQuestionId);
+
+          // Firestoreからも削除
+          await updateAnswer(lastQuestionId, null);
+
+          // メッセージを削除（最後のAI質問 + ユーザーの回答）
+          setMessages(prev => {
+            // 最後から2つのメッセージを削除
+            return prev.slice(0, -2);
+          });
+
+          // 削除した質問を再表示
+          if (questionToDelete) {
+            const questionText = typeof questionToDelete.text === 'function'
+              ? questionToDelete.text(answers)
+              : questionToDelete.text;
+
+            setCurrentQuestion({
+              ...questionToDelete,
+              text: questionText
+            });
+            addAIMessage('前の質問に戻りました。');
+            addAIMessage(questionText, questionToDelete);
+          }
+        } catch (error) {
+          console.error('Error going back:', error);
+          addAIMessage('戻る処理に失敗しました。もう一度お試しください。');
+        } finally {
+          setIsLoading(false);
+        }
+      }
+      return;
+    }
+
+    // Phase 2以降の処理（元のロジック）
     const questions = getStepQuestions(currentStep);
     const answeredQuestions = Object.keys(answers).filter(qId =>
       questions.some(q => q.id === qId)
@@ -800,7 +1781,7 @@ const ChatContainer = () => {
         // 削除した質問を再表示
         if (questionToDelete) {
           setCurrentQuestion(questionToDelete);
-          addAIMessage(`${lastQuestionId}の回答を削除しました。もう一度回答してください。`);
+          addAIMessage('前の質問に戻りました。');
           addAIMessage(questionToDelete.text, questionToDelete);
         }
       } catch (error) {
@@ -814,14 +1795,108 @@ const ChatContainer = () => {
 
   // ステップ完了処理
   const handleStepComplete = () => {
-    if (currentStep < 5) {
-      addAIMessage(`Step${currentStep}が完了しました！次のステップに進みます。`);
-      setTimeout(() => {
+    // Phase 0~5まで存在するため、currentStep < 6に変更
+    if (currentStep < 6) {
+      const phaseNames = ['補助対象判定', '基本情報', '顧客ニーズと市場の動向', '自社の強み', '経営方針・目標', '補助事業の内容', '文章生成スタイルの確認'];
+      const phaseName = phaseNames[currentStep] || `Phase ${currentStep}`;
+
+      // Phase 0（補助対象判定）の場合はメッセージを表示せず、直接次のPhaseに進む
+      if (currentStep === 0) {
         nextStep();
-      }, 2000);
+      } else {
+        addAIMessage(`${phaseName}が完了しました！次のフェーズに進みます。`);
+        setTimeout(() => {
+          nextStep();
+        }, 2000);
+      }
     } else {
       addAIMessage('お疲れ様でした！全ての質問が完了しました。申請書を生成できます。');
       setShowDocument(true);
+    }
+  };
+
+  // Phase 6に進む共通処理
+  const proceedToPhase6 = () => {
+    const phase6Question = getNextPhaseQuestion(6, answers);
+    if (phase6Question) {
+      setCurrentQuestion(phase6Question);
+      addAIMessage(phase6Question.text, phase6Question);
+      if (phase6Question.helpText) {
+        addAIMessage(phase6Question.helpText);
+      }
+    }
+  };
+
+  // Phase 5完了時のAI分析処理
+  const handlePhase5Complete = async () => {
+    setIsLoading(true);
+
+    try {
+      addAIMessage('Phase 5が完了しました！\n\n回答内容を分析しています...');
+
+      // Google Maps情報を取得
+      const placeData = answers['Q1-0'] || {};
+
+      // AI分析を実行
+      const result = await checkCompletenessAndDecideNext(answers, placeData);
+
+      if (result.action === 'proceed_to_phase6') {
+        // 完成度90%以上 → Phase 6へ
+        addAIMessage(result.message);
+
+        const phase6Question = getNextPhaseQuestion(6, answers);
+        if (phase6Question) {
+          setCurrentQuestion(phase6Question);
+          addAIMessage(phase6Question.text, phase6Question);
+          if (phase6Question.helpText) {
+            addAIMessage(phase6Question.helpText);
+          }
+        }
+      } else if (result.action === 'ai_follow_up') {
+        // 完成度90%未満 → AI追加質問
+        addAIMessage(result.message);
+
+        // AI生成質問を表示
+        const aiQuestion = result.question;
+        const question = {
+          id: aiQuestion.id,
+          text: aiQuestion.text,
+          type: aiQuestion.type,
+          placeholder: aiQuestion.placeholder,
+          helpText: aiQuestion.helpText,
+          options: aiQuestion.options || undefined,
+          targetSection: aiQuestion.targetSection,
+          targetGap: aiQuestion.targetGap,
+          isAIGenerated: true
+        };
+
+        setCurrentQuestion(question);
+        addAIMessage(question.text, question);
+        if (question.helpText) {
+          addAIMessage(question.helpText);
+        }
+
+        // 次回の分析のために gaps を保存
+        setAiAnalysis(JSON.stringify({
+          completeness: result.completeness,
+          gaps: result.gaps
+        }));
+      }
+    } catch (error) {
+      console.error('[Phase 5 Complete] Error:', error);
+      addAIMessage('分析中にエラーが発生しました。Phase 6に進みます。');
+
+      // エラー時はフォールバック：Phase 6へ進む
+      const phase6Question = getNextPhaseQuestion(6, answers);
+      if (phase6Question) {
+        setCurrentQuestion(phase6Question);
+        addAIMessage(phase6Question.text, phase6Question);
+        if (phase6Question.helpText) {
+          addAIMessage(phase6Question.helpText);
+        }
+      }
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -833,7 +1908,25 @@ const ChatContainer = () => {
   // 質問コスト取得
   const getQuestionCost = (questionId) => {
     const costs = {
+      // Phase 1（申請資格確認）- 無料
       'Q1-1': 0, 'Q1-2': 0, 'Q1-3': 0,
+
+      // Phase 2（顧客ニーズと市場の動向）- 10ポイント
+      'P2-1': 10, 'P2-2': 10, 'P2-3': 10, 'P2-4': 10, 'P2-5': 10, 'P2-6': 10,
+
+      // Phase 3（自社の強み）- 10-20ポイント
+      'P3-1': 10, 'P3-2': 10, 'P3-3': 10, 'P3-4': 10, 'P3-5': 10, 'P3-6': 15, 'P3-7': 10,
+
+      // Phase 4（経営方針・目標）- 10-20ポイント
+      'P4-1': 10, 'P4-2': 10, 'P4-3': 10, 'P4-4': 10, 'P4-5': 10, 'P4-6': 15, 'P4-7': 15, 'P4-8': 20,
+
+      // Phase 5（補助事業の内容）- 15-30ポイント
+      'P5-1': 20, 'P5-2': 20, 'P5-3': 15, 'P5-4': 15, 'P5-5': 15, 'P5-6': 20, 'P5-7': 25, 'P5-8': 20, 'P5-9': 20, 'P5-10': 20, 'P5-11': 15, 'P5-12': 15,
+
+      // Phase 6（文章スタイル確認）- 無料
+      'P6-1': 0, 'P6-2': 0, 'P6-3': 0,
+
+      // 旧形式（後方互換性のため残す）
       'Q2-0': 0, 'Q2-1': 0, 'Q2-2': 10, 'Q2-2-1': 10, 'Q2-3': 10, 'Q2-4': 10, 'Q2-5': 10,
       'Q2-6': 10, 'Q2-7-1': 10, 'Q2-7-2': 10, 'Q2-7-3': 10, 'Q2-7-1-profit': 10, 'Q2-7-2-profit': 10, 'Q2-7-3-profit': 10, 'Q2-9': 10, 'Q2-10': 0, 'Q2-11': 10, 'Q2-12': 10, 'Q2-13': 10,
       'Q3-1': 10, 'Q3-1-1': 10, 'Q3-2': 0, 'Q3-3': 10, 'Q3-4': 10, 'Q3-5': 10, 'Q3-6': 20, 'Q3-7': 10, 'Q3-8': 10, 'Q3-9': 10,
@@ -847,7 +1940,21 @@ const ChatContainer = () => {
 
   // 現在の質問を取得（回答済み質問を除外）
   const getCurrentQuestion = () => {
-    // Step 1は対話型フローを使用
+    // Phase 0: 補助対象判定
+    if (currentStep === 0) {
+      const nextQuestion = getNextPhase0Question(answers);
+      console.log('[Phase 0] Next question:', nextQuestion?.id || 'complete');
+
+      // Phase 0完了チェック
+      if (!nextQuestion && isPhase0Complete(answers)) {
+        console.log('[Phase 0] Complete!');
+        return null;
+      }
+
+      return nextQuestion;
+    }
+
+    // Step 1は対話型フローを使用（Phase 1: 申請資格確認）
     if (currentStep === 1) {
       const nextQuestion = getNextStep1Question(answers);
       console.log('[Conversational] Step 1 next question:', nextQuestion?.id || 'complete');
@@ -858,11 +1965,120 @@ const ChatContainer = () => {
         return null; // Step 1完了
       }
 
+      // 動的プロパティ（関数形式）を解決
+      if (nextQuestion) {
+        return {
+          ...nextQuestion,
+          text: typeof nextQuestion.text === 'function' ? nextQuestion.text(answers) : nextQuestion.text,
+          options: typeof nextQuestion.options === 'function' ? nextQuestion.options(answers) : nextQuestion.options,
+          helpText: typeof nextQuestion.helpText === 'function' ? nextQuestion.helpText(answers) : nextQuestion.helpText
+        };
+      }
+
       return nextQuestion;
     }
 
-    // Step 2も対話型フローを使用
-    if (currentStep === 2) {
+    // Step 2-5は新しいPhaseフローを使用
+    if (currentStep >= 2 && currentStep <= 5) {
+      const phase = currentStep; // Step 2 → Phase 2, Step 3 → Phase 3, etc.
+
+      // ⚠️ Step 2の場合は会話形式マネージャーを使用
+      if (currentStep === 2) {
+        if (phase2Manager) {
+          const question = phase2Manager.getCurrentQuestion();
+          console.log('[Phase 2 Conversational] getCurrentQuestion:', question?.id || 'null');
+          if (question) {
+            return question;
+          }
+          // null = Phase 2完了
+          return null;
+        }
+        // マネージャー未初期化（初期化待ち）
+        console.log('[Phase 2 Conversational] Manager not initialized yet, flagging for init');
+        return { ai_generation: true, phase: 2 };
+      }
+
+      // ⚠️ Step 3の場合は会話形式マネージャーを使用
+      if (currentStep === 3) {
+        if (phase3Manager) {
+          const question = phase3Manager.getCurrentQuestion();
+          console.log('[Phase 3 Conversational] getCurrentQuestion:', question?.id || 'null');
+          if (question) {
+            return question;
+          }
+          // null = Phase 3完了
+          return null;
+        }
+        // マネージャー未初期化（初期化待ち）
+        console.log('[Phase 3 Conversational] Manager not initialized yet, flagging for init');
+        return { ai_generation: true, phase: 3 };
+      }
+
+      // Step 5の場合、Phase 5完了後にPhase 6（文章スタイル確認）に進む
+      if (currentStep === 5) {
+        // Phase 5の質問を確認
+        const phase5Question = getNextPhaseQuestion(5, answers);
+
+        if (phase5Question) {
+          // Phase 5の質問がまだある場合
+          console.log(`[Phase 5] Next question:`, phase5Question.id);
+          return {
+            ...phase5Question,
+            text: typeof phase5Question.text === 'function' ? phase5Question.text(answers) : phase5Question.text,
+            options: typeof phase5Question.options === 'function' ? phase5Question.options(answers) : phase5Question.options,
+            helpText: typeof phase5Question.helpText === 'function' ? phase5Question.helpText(answers) : phase5Question.helpText
+          };
+        }
+
+        // Phase 5完了、Phase 6の質問を確認
+        if (isPhaseComplete(5, answers)) {
+          const phase6Question = getNextPhaseQuestion(6, answers);
+
+          if (phase6Question) {
+            // Phase 6の質問がある場合
+            console.log(`[Phase 6] Next question:`, phase6Question.id);
+            return {
+              ...phase6Question,
+              text: typeof phase6Question.text === 'function' ? phase6Question.text(answers) : phase6Question.text,
+              options: typeof phase6Question.options === 'function' ? phase6Question.options(answers) : phase6Question.options,
+              helpText: typeof phase6Question.helpText === 'function' ? phase6Question.helpText(answers) : phase6Question.helpText
+            };
+          }
+
+          // Phase 6も完了している場合
+          if (isPhaseComplete(6, answers)) {
+            console.log(`[Phase 6] Complete! Ready to generate application.`);
+            return null;
+          }
+        }
+      }
+
+      // Step 3-4の通常フロー
+      const nextQuestion = getNextPhaseQuestion(phase, answers);
+      console.log(`[Phase ${phase}] Next question:`, nextQuestion?.id || 'complete');
+
+      // Phase完了チェック
+      if (!nextQuestion && isPhaseComplete(phase, answers)) {
+        console.log(`[Phase ${phase}] Complete!`);
+        return null; // Phase完了
+      }
+
+      // 質問が見つかった場合、そのまま返す
+      if (nextQuestion) {
+        return {
+          ...nextQuestion,
+          // textやoptionsが関数形式の場合は解決（Phase 2-5では現状静的だが念のため）
+          text: typeof nextQuestion.text === 'function' ? nextQuestion.text(answers) : nextQuestion.text,
+          options: typeof nextQuestion.options === 'function' ? nextQuestion.options(answers) : nextQuestion.options,
+          helpText: typeof nextQuestion.helpText === 'function' ? nextQuestion.helpText(answers) : nextQuestion.helpText
+        };
+      }
+
+      return nextQuestion;
+    }
+
+    // Step 6以降は旧Step 2対話型フローを使用（後方互換性のため残す）
+    if (currentStep === 6) {
       // 最初の質問がまだ回答されていない場合
       if (!answers['Q2-1']) {
         const firstQuestion = getFirstStep2Question();
@@ -1826,6 +3042,16 @@ const ChatContainer = () => {
 
   // Google Mapsから推測された回答を取得
   const getSuggestedAnswer = (questionId) => {
+    // currentQuestionのdefaultValueをチェック
+    if (currentQuestion && currentQuestion.defaultValue) {
+      // defaultValueが関数の場合は実行
+      if (typeof currentQuestion.defaultValue === 'function') {
+        return currentQuestion.defaultValue(answers);
+      }
+      // defaultValueが値の場合はそのまま返す
+      return currentQuestion.defaultValue;
+    }
+
     // Q1-3の場合、Google Mapsから商品・サービスを推測
     if (questionId === 'Q1-3' && answers['Q1-0']) {
       const placeInfo = answers['Q1-0'];
@@ -1879,6 +3105,117 @@ const ChatContainer = () => {
     return <ApplicationDocument onBack={() => setShowDocument(false)} />;
   }
 
+  // デバッグ用: answersを整形してコンソールに出力
+  const debugShowAnswers = () => {
+    console.clear();
+    console.log('='.repeat(80));
+    console.log('📊 補助金申請データ確認');
+    console.log('='.repeat(80));
+    console.log('\n【基本情報】');
+    console.log('現在のステップ:', currentStep);
+    console.log('アプリケーションID:', currentApplication?.id || 'なし');
+    console.log('作成日時:', currentApplication?.createdAt?.toDate?.()?.toLocaleString('ja-JP') || 'なし');
+    console.log('ユーザーID:', user?.uid || 'なし');
+
+    // Phase 1の回答
+    console.log('\n' + '='.repeat(80));
+    console.log('【Phase 1: 基本情報】');
+    console.log('='.repeat(80));
+    const phase1Keys = Object.keys(answers).filter(k => k.startsWith('Q1-')).sort();
+    phase1Keys.forEach(key => {
+      const answer = answers[key];
+      console.log(`\n${key}:`);
+      if (key === 'Q1-0' && typeof answer === 'object') {
+        console.log('  店舗名:', answer.name);
+        console.log('  業種:', answer.types?.join(', '));
+        console.log('  評価:', answer.rating);
+      } else if (typeof answer === 'object') {
+        console.log(JSON.stringify(answer, null, 2));
+      } else {
+        console.log(' ', answer);
+      }
+    });
+
+    // Phase 2会話形式の回答
+    console.log('\n' + '='.repeat(80));
+    console.log('【Phase 2: 会話形式の回答（conv-）】');
+    console.log('='.repeat(80));
+    const convKeys = Object.keys(answers).filter(k => k.startsWith('conv-')).sort();
+    if (convKeys.length > 0) {
+      convKeys.forEach(key => {
+        const answer = answers[key];
+        console.log(`\n${key}:`);
+        if (Array.isArray(answer)) {
+          console.log('  ✅ 複数選択:', answer.join(', '));
+        } else if (typeof answer === 'object') {
+          console.log(JSON.stringify(answer, null, 2));
+        } else {
+          console.log(' ', answer);
+        }
+      });
+    } else {
+      console.log('会話形式の回答はまだありません');
+    }
+
+    // Phase 2の統合済み回答
+    console.log('\n' + '='.repeat(80));
+    console.log('【Phase 2: 統合済みデータ】');
+    console.log('='.repeat(80));
+    const phase2Keys = Object.keys(answers).filter(k =>
+      k.startsWith('P2-') ||
+      k.includes('target_customers') ||
+      k.includes('customer_composition') ||
+      k.includes('customer_needs') ||
+      k.includes('market_trends')
+    ).sort();
+    if (phase2Keys.length > 0) {
+      phase2Keys.forEach(key => {
+        const answer = answers[key];
+        console.log(`\n${key}:`);
+        if (typeof answer === 'object') {
+          console.log(JSON.stringify(answer, null, 2));
+        } else {
+          console.log(' ', answer);
+        }
+      });
+    } else {
+      console.log('統合済みデータはまだありません');
+    }
+
+    // その他のPhaseの回答
+    console.log('\n' + '='.repeat(80));
+    console.log('【その他の回答】');
+    console.log('='.repeat(80));
+    const otherKeys = Object.keys(answers).filter(k =>
+      !k.startsWith('Q1-') &&
+      !k.startsWith('conv-') &&
+      !k.startsWith('P2-') &&
+      !k.includes('target_customers') &&
+      !k.includes('customer_composition') &&
+      !k.includes('customer_needs') &&
+      !k.includes('market_trends')
+    ).sort();
+    if (otherKeys.length > 0) {
+      otherKeys.forEach(key => {
+        const answer = answers[key];
+        console.log(`\n${key}:`);
+        if (Array.isArray(answer)) {
+          console.log('  複数選択:', answer.join(', '));
+        } else if (typeof answer === 'object') {
+          console.log(JSON.stringify(answer, null, 2));
+        } else {
+          console.log(' ', answer);
+        }
+      });
+    }
+
+    console.log('\n' + '='.repeat(80));
+    console.log('✅ データ確認完了（開発者ツールのコンソールをご確認ください）');
+    console.log('='.repeat(80));
+
+    alert('データをコンソールに出力しました。F12キーを押して開発者ツールのConsoleタブをご確認ください。');
+  };
+
   return (
     <div className="chat-container">
       <div className="chat-header">
@@ -1886,9 +3223,24 @@ const ChatContainer = () => {
         <div className="point-balance">
           ポイント残高: {pointBalance.toLocaleString()}pt
         </div>
+        <button
+          onClick={debugShowAnswers}
+          style={{
+            marginLeft: '10px',
+            padding: '8px 16px',
+            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            color: 'white',
+            border: 'none',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            fontSize: '14px',
+            fontWeight: '600'
+          }}
+          title="回答データをコンソールに出力"
+        >
+          📊 データ確認
+        </button>
       </div>
-
-      <ProgressBar currentStep={currentStep} totalSteps={5} />
 
       {/* 完成度インジケーター */}
       {completenessScore > 0 && (
@@ -1929,19 +3281,68 @@ const ChatContainer = () => {
         />
       )}
 
-      {currentQuestion && !showAiOptions && (
-        <QuestionInput
-          key={currentQuestion.id}
-          question={currentQuestion}
-          onAnswer={handleAnswer}
-          isLoading={isLoading}
-          previousAnswer={getPreviousAnswer(currentQuestion.id)}
-          suggestedAnswer={getSuggestedAnswer(currentQuestion.id)}
-          aiDraft={aiDraft}
-          onGoBack={handleGoBack}
-          canGoBack={Object.keys(answers).length > 0}
-          allAnswers={answers}
+
+
+      {currentQuestion && !showAiOptions && currentQuestion.type === 'store_profile' && (
+        <StoreProfileEditor
+          googleMapsData={answers['Q1-0']}
+          websiteUrl={answers['Q1-0-website'] || answers['Q1-0']?.website}
+          onSave={(profile) => handleAnswer('Q1-0-profile', profile)}
+          onCancel={handleGoBack}
         />
+      )}
+
+      {currentQuestion && !showAiOptions && currentQuestion.type !== 'store_profile' && (
+        <>
+          {/* 新しい質問タイプのハンドリング */}
+          {currentQuestion.type === 'file_upload' ? (
+            <FileUpload
+              questionId={currentQuestion.id}
+              onUploadComplete={(uploadData) => {
+                handleAnswer(currentQuestion.id, uploadData);
+              }}
+              onSkip={() => {
+                // Q1-14-methodに戻る
+                handleGoBack();
+              }}
+            />
+          ) : currentQuestion.type === 'expense_manual_input' ? (
+            <ManualExpenseInput
+              onSubmit={(expenseData) => {
+                handleAnswer(currentQuestion.id, expenseData);
+              }}
+              onCancel={handleGoBack}
+            />
+          ) : currentQuestion.type === 'ai_expense_estimation' ? (
+            <AIExpenseEstimation
+              answers={answers}
+              onComplete={(estimationData) => {
+                handleAnswer(currentQuestion.id, estimationData);
+              }}
+            />
+          ) : currentQuestion.type === 'supplier_table_input' ? (
+            <SupplierTableInput
+              onSubmit={(supplierData) => {
+                handleAnswer(currentQuestion.id, supplierData);
+              }}
+              onCancel={handleGoBack}
+            />
+          ) : (
+            // すべての質問タイプ（welcome、place_autocomplete、text等）をQuestionInputで処理
+            <QuestionInput
+              key={currentQuestion.id}
+              question={currentQuestion}
+              onAnswer={handleAnswer}
+              isLoading={isLoading}
+              previousAnswer={getPreviousAnswer(currentQuestion.id)}
+              suggestedAnswer={getSuggestedAnswer(currentQuestion.id)}
+              aiDraft={aiDraft}
+              onGoBack={handleGoBack}
+              canGoBack={Object.keys(answers).length > 0 && currentQuestion.type !== 'welcome'}
+              allAnswers={answers}
+            />
+          )}
+        </>
       )}
 
       {!currentQuestion && currentStep === 5 && isApplicationComplete() && (

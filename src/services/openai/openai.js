@@ -1,10 +1,11 @@
-import OpenAI from 'openai';
+/**
+ * OpenAI API呼び出し（Cloud Functions経由）
+ * セキュリティ対策: APIキーはサーバーサイドで管理
+ */
 
-// OpenAI APIクライアントの初期化
-const openai = new OpenAI({
-  apiKey: process.env.REACT_APP_OPENAI_API_KEY,
-  dangerouslyAllowBrowser: true // クライアントサイドで使用する場合
-});
+import { getFunctions, httpsCallable } from 'firebase/functions';
+
+const functions = getFunctions();
 
 /**
  * ユーザーの簡潔な回答を補完して詳細な文章にする
@@ -29,150 +30,109 @@ export const enhanceAnswer = async (questionId, questionText, userAnswer, contex
       return null;
     }
 
-    // 短い回答（5文字未満）は補完せずそのまま使う
-    if (typeof userAnswer === 'string' && userAnswer.length < 5) {
+    // 数値や短い文字列の場合は補完不要
+    if (typeof userAnswer === 'number') {
+      console.log('[enhanceAnswer] Skipped - number answer');
+      return null;
+    }
+
+    if (typeof userAnswer === 'string' && userAnswer.length < 10) {
       console.log('[enhanceAnswer] Skipped - too short');
       return null;
     }
 
-    // 店舗情報など具体的な固有名詞は補完不要
-    const noEnhanceQuestions = ['Q2-0', 'Q2-1', 'Q2-2', 'Q2-3', 'Q2-4', 'Q2-6'];
-    if (noEnhanceQuestions.includes(questionId)) {
-      console.log('[enhanceAnswer] Skipped - noEnhance question');
-      return null;
-    }
-
-    console.log('[enhanceAnswer] Generating enhancement with OpenAI...');
-
-    // 質問の種類に応じて適切な文字数を設定
-    let targetLength = '50-80文字程度';
-    let maxTokens = 200;
-
-    // 詳細な説明が必要な質問は長めに設定
-    const longAnswerQuestions = ['Q3-1', 'Q3-2', 'Q4-1', 'Q4-2']; // 販路開拓や経営計画など
-    if (longAnswerQuestions.includes(questionId)) {
-      targetLength = '100-150文字程度';
-      maxTokens = 300;
-    }
-
-    // 口コミ情報から特徴を抽出
-    let reviewInsights = '';
-    if (context.reviews && context.reviews.length > 0) {
-      const reviewTexts = context.reviews.slice(0, 3).map(r => r.text).join('\n');
-      reviewInsights = `\n【Google Maps口コミ（参考）】\n${reviewTexts}\n※口コミから読み取れる特徴を活用してください`;
-    }
-
-    const prompt = `あなたは小規模事業者持続化補助金申請のサポートAIです。
-ユーザーは申請書作成の経験がなく、短い回答しかできません。
-ユーザーの簡潔な回答を、申請書に適した詳細で説得力のある文章に補完してください。
-
-【質問】
-${questionText}
-
-【ユーザーの回答】
-${userAnswer}
-
-【店舗情報（参考）】
-${context.storeName ? `店舗名: ${context.storeName}` : ''}
-${context.storeAddress ? `住所: ${context.storeAddress}` : ''}
-${context.businessType ? `業種: ${context.businessType}` : ''}
-${context.rating ? `評価: ${context.rating}/5.0 (${context.userRatingsTotal}件)` : ''}
-${context.philosophy ? `経営理念: ${context.philosophy}` : ''}${reviewInsights}
-
-【補完のポイント】
-1. ユーザーの意図を正確に汲み取る
-2. 店舗情報や口コミから読み取れる実際の特徴を活用する（重要）
-3. ${targetLength}に拡張する（重要：この文字数を守ること）
-4. 申請書として自然な文章にする
-5. 誇張せず、実現可能な内容にする
-6. 根拠のない創作をしない（口コミや店舗情報に基づいた内容のみ）
-7. 簡潔さを保ちながら、必要な情報を盛り込む
-
-補完された文章のみを出力してください。説明や前置きは不要です。`;
-
-    console.log(`[OpenAI] Calling API for ${questionId}...`);
-
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini", // コスト効率の良いモデル
-      messages: [
-        {
-          role: "system",
-          content: "あなたは補助金申請書作成の専門家です。ユーザーの簡潔な回答を、申請書に適した詳細な文章に補完します。指定された文字数を必ず守ってください。"
-        },
-        {
-          role: "user",
-          content: prompt
-        }
-      ],
-      temperature: 0.7,
-      max_tokens: maxTokens,
+    // Cloud Functionsを呼び出し
+    const generateAnswerDraftFunc = httpsCallable(functions, 'generateAnswerDraft');
+    const result = await generateAnswerDraftFunc({
+      questionText,
+      userInput: userAnswer,
+      context
     });
 
-    const enhancedText = completion.choices[0].message.content.trim();
+    console.log('[enhanceAnswer] Success:', result.data);
+    return result.data.enhancedAnswer;
 
-    console.log(`[OpenAI] Answer enhanced: ${userAnswer} -> ${enhancedText}`);
-    console.log(`[OpenAI] Response length: ${enhancedText.length}`);
+  } catch (error) {
+    console.error('[enhanceAnswer] Error:', error);
 
-    // 空文字列の場合はnullを返す
-    if (!enhancedText || enhancedText.length === 0) {
-      console.log('[enhanceAnswer] Empty response from OpenAI API');
-      return null;
+    // エラーハンドリング
+    if (error.code === 'unauthenticated') {
+      throw new Error('ログインが必要です');
+    } else if (error.code === 'failed-precondition') {
+      throw new Error('ポイント残高が不足しています');
+    } else if (error.code === 'resource-exhausted') {
+      throw new Error(error.message);
     }
 
-    return enhancedText;
-  } catch (error) {
-    console.error('Error enhancing answer with OpenAI:', error);
-    // エラーの場合は元の回答を返す
+    // その他のエラーは補完なしで続行
+    console.warn('[enhanceAnswer] Continuing without enhancement');
     return null;
   }
 };
 
 /**
- * 質問に対する回答の下書きを生成（3つの例を提示）
+ * AI Draftを生成（簡易版）
+ * @param {string} questionText - 質問文
+ * @param {string} userInput - ユーザーの入力
+ * @param {Object} allAnswers - 全回答
+ * @returns {Promise<string>} 生成されたDraft
  */
-export const generateAnswerDraft = async (questionId, questionText, context = {}) => {
+export const generateAnswerDraft = async (questionText, userInput, allAnswers = {}) => {
   try {
-    console.log(`Generating answer draft for ${questionId}...`);
+    console.log('[generateAnswerDraft] Generating draft for:', questionText);
 
-    const prompt = `以下の質問に対して、3つの回答例を提示してください。
-
-【質問】
-${questionText}
-
-【店舗情報】
-${context.storeName ? `店舗名: ${context.storeName}` : ''}
-${context.storeAddress ? `住所: ${context.storeAddress}` : ''}
-
-JSON形式で3つの例を返してください：
-{
-  "examples": ["例1", "例2", "例3"]
-}`;
-
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content: "あなたは補助金申請書作成の専門家です。"
-        },
-        {
-          role: "user",
-          content: prompt
-        }
-      ],
-      temperature: 0.8,
-      max_tokens: 300,
-      response_format: { type: "json_object" }
+    // Cloud Functionsを呼び出し
+    const generateAnswerDraftFunc = httpsCallable(functions, 'generateAnswerDraft');
+    const result = await generateAnswerDraftFunc({
+      questionText,
+      userInput,
+      context: allAnswers
     });
 
-    const result = JSON.parse(completion.choices[0].message.content);
-    console.log(`Draft generated for ${questionId}:`, result);
+    console.log('[generateAnswerDraft] Success');
+    return result.data.enhancedAnswer;
 
-    return result.examples || [];
   } catch (error) {
-    console.error('Error generating draft:', error);
-    return [];
+    console.error('[generateAnswerDraft] Error:', error);
+    throw error;
   }
 };
 
-export default { enhanceAnswer, generateAnswerDraft };
+/**
+ * 様式2（経営計画書兼補助事業計画書）を生成
+ * @param {Object} answers - 全質問の回答
+ * @returns {Promise<string>} 生成されたMarkdownテキスト
+ */
+export const generateSubsidyApplication = async (answers) => {
+  try {
+    console.log('[generateSubsidyApplication] Generating application...');
+
+    // Cloud Functionsを呼び出し
+    const generateFunc = httpsCallable(functions, 'generateSubsidyApplication');
+    const result = await generateFunc({ answers });
+
+    console.log('[generateSubsidyApplication] Success');
+    console.log('Points used:', result.data.pointsUsed);
+    console.log('Remaining points:', result.data.remainingPoints);
+
+    return result.data.generatedText;
+
+  } catch (error) {
+    console.error('[generateSubsidyApplication] Error:', error);
+
+    // エラーハンドリング
+    if (error.code === 'unauthenticated') {
+      throw new Error('ログインが必要です');
+    } else if (error.code === 'failed-precondition') {
+      throw new Error('ポイント残高が不足しています。申請書生成には100ポイント必要です。');
+    } else if (error.code === 'resource-exhausted') {
+      throw new Error(error.message);
+    } else if (error.code === 'not-found') {
+      throw new Error('ユーザー情報が見つかりません');
+    }
+
+    throw new Error('申請書の生成に失敗しました。もう一度お試しください。');
+  }
+};
+
+export default { enhanceAnswer, generateAnswerDraft, generateSubsidyApplication };

@@ -49,11 +49,15 @@ export const usePoints = () => {
 
   // ポイント消費
   const consumePoints = async (amount, description) => {
+    console.log('[usePoints] consumePoints called:', { amount, description, user: user?.uid, pointBalance });
+
     if (!user) {
+      console.error('[usePoints] User not authenticated');
       throw new Error('User not authenticated');
     }
 
     if (pointBalance < amount) {
+      console.error('[usePoints] Insufficient points:', { required: amount, current: pointBalance });
       throw new Error('Insufficient points');
     }
 
@@ -62,16 +66,20 @@ export const usePoints = () => {
       setError(null);
 
       const newBalance = pointBalance - amount;
-      
+      console.log('[usePoints] Consuming points:', { old: pointBalance, amount, new: newBalance });
+
       // ユーザーのポイント残高を更新
       await updateUserPoints(user.uid, newBalance);
-      
+      console.log('[usePoints] User points updated in Firestore');
+
       // トランザクション記録を追加
       await addPointTransaction(user.uid, 'consume', amount, description);
-      
+      console.log('[usePoints] Transaction added to Firestore');
+
       // ローカル状態を更新
       setPointBalance(newBalance);
-      
+      console.log('[usePoints] Local state updated');
+
       // 履歴を更新
       const newTransaction = {
         id: Date.now().toString(),
@@ -83,8 +91,10 @@ export const usePoints = () => {
       };
       setPointHistory(prev => [newTransaction, ...prev]);
 
+      console.log('[usePoints] Consume points successful');
       return true;
     } catch (err) {
+      console.error('[usePoints] Error consuming points:', err);
       setError(err.message);
       throw err;
     } finally {

@@ -1,0 +1,103 @@
+  // 現在の質問を取得（回答済み質問を除外）
+  const getCurrentQuestion = () => {
+    // Step 1は対話型フローを使用
+    if (currentStep === 1) {
+      const nextQuestion = getNextStep1Question(answers);
+      console.log('[Conversational] Step 1 next question:', nextQuestion?.id || 'complete');
+
+      // Step 1完了チェック
+      if (!nextQuestion && isStep1Complete(answers)) {
+        console.log('[Conversational] Step 1 complete!');
+        return null; // Step 1完了
+      }
+
+      return nextQuestion;
+    }
+
+    // Step 2も対話型フローを使用
+    if (currentStep === 2) {
+      // 最初の質問がまだ回答されていない場合
+      if (!answers['Q2-1']) {
+        const firstQuestion = getFirstStep2Question();
+        console.log('[Conversational] Step 2 first question:', firstQuestion?.id);
+        return {
+          id: firstQuestion.id,
+          text: typeof firstQuestion.question === 'function' ? firstQuestion.question(answers) : firstQuestion.question,
+          type: firstQuestion.type,
+          options: firstQuestion.options,
+          validation: firstQuestion.validation,
+          examples: firstQuestion.examples,
+          inputHint: firstQuestion.inputHint,
+          helpText: firstQuestion.helpText
+        };
+      }
+
+      // 最後に回答した質問を探す
+      const allAnsweredQ2 = Object.keys(answers).filter(qId => qId.startsWith('Q2-'));
+      if (allAnsweredQ2.length === 0) {
+        const firstQuestion = getFirstStep2Question();
+        return {
+          id: firstQuestion.id,
+          text: typeof firstQuestion.question === 'function' ? firstQuestion.question(answers) : firstQuestion.question,
+          type: firstQuestion.type,
+          options: firstQuestion.options,
+          validation: firstQuestion.validation,
+          examples: firstQuestion.examples,
+          inputHint: firstQuestion.inputHint,
+          helpText: firstQuestion.helpText
+        };
+      }
+
+      // 最後に回答した質問IDを取得
+      const lastAnsweredQId = allAnsweredQ2[allAnsweredQ2.length - 1];
+      const lastAnswer = answers[lastAnsweredQId];
+
+      // 次の質問を取得
+      const nextQuestion = getNextStep2Question(lastAnsweredQId, lastAnswer, answers);
+      console.log('[Conversational] Step 2 next question:', nextQuestion?.id || 'complete');
+
+      // Step 2完了チェック
+      if (!nextQuestion && isStep2Complete(answers)) {
+        console.log('[Conversational] Step 2 complete!');
+        return null; // Step 2完了
+      }
+
+      if (nextQuestion) {
+        // 質問テキストが関数の場合は実行
+        const questionText = typeof nextQuestion.question === 'function'
+          ? nextQuestion.question(answers)
+          : nextQuestion.question;
+
+        return {
+          id: nextQuestion.id,
+          text: questionText,
+          type: nextQuestion.type,
+          options: nextQuestion.options,
+          validation: nextQuestion.validation,
+          examples: nextQuestion.examples,
+          inputHint: nextQuestion.inputHint,
+          helpText: nextQuestion.helpText
+        };
+      }
+
+      return null;
+    }
+
+    // Step 3以降は従来のフロー
+    const questions = getStepQuestions(currentStep);
+    const answeredQuestions = Object.keys(answers).filter(qId =>
+      questions.some(q => q.id === qId)
+    );
+
+    console.log('getCurrentQuestion:', {
+      currentStep,
+      questions: questions.map(q => q.id),
+      answeredQuestions,
+      answers,
+      answersKeys: Object.keys(answers)
+    });
+
+    const nextQuestion = questions.find(q => !answeredQuestions.includes(q.id));
+    console.log('nextQuestion:', nextQuestion?.id || 'none');
+    return nextQuestion;
+  };

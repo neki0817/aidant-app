@@ -1,0 +1,191 @@
+  // ===== 競合分析（Google Maps活用） =====
+  {
+    id: 'Q2-9',
+    question: '競合について伺います。\n\nGoogle Mapsで検索した周辺の同業他社を分析しますか？\n\n※ AIが自動で競合店舗を分析します',
+    type: 'single_select',
+    priority: 1,
+    category: '競合分析',
+    options: [
+      { value: 'yes', label: 'はい、分析してほしい' },
+      { value: 'no', label: 'いいえ、自分で入力する' }
+    ],
+    validation: {
+      required: true
+    },
+    nextQuestion: (answer, answers) => {
+      if (answer === 'yes') {
+        return 'Q2-9-analyzing'; // 分析中表示
+      } else {
+        return 'Q2-9-manual'; // 手動入力フロー
+      }
+    }
+  },
+
+  // 分析中の表示（自動的にスキップ）
+  {
+    id: 'Q2-9-analyzing',
+    question: 'Google Mapsで周辺の競合を分析しています...\n\n少々お待ちください。',
+    type: 'auto_analyze_competitors', // カスタムタイプ
+    priority: 1,
+    category: '競合分析',
+    autoExecute: true,
+    nextQuestion: (answer, answers) => 'Q2-9-result'
+  },
+
+  // 分析結果の表示
+  {
+    id: 'Q2-9-result',
+    question: (answers) => {
+      const result = answers['Q2-9-analyzing'] || {};
+      const competitors = result.competitors || [];
+
+      if (competitors.length === 0) {
+        return '周辺に競合店舗が見つかりませんでした。\n\n手動で入力しますか？';
+      }
+
+      return `周辺の競合を${competitors.length}件見つけました。\n\n主な競合:\n${competitors.slice(0, 3).map((c, i) => `${i + 1}. ${c.name} (評価: ${c.rating}/5.0, 口コミ: ${c.user_ratings_total}件)`).join('\n')}\n\nこの情報で問題ありませんか？`;
+    },
+    type: 'single_select',
+    priority: 1,
+    category: '競合分析',
+    options: [
+      { value: 'ok', label: 'はい、この情報で良い' },
+      { value: 'manual', label: 'いいえ、自分で入力する' }
+    ],
+    validation: {
+      required: true
+    },
+    nextQuestion: (answer, answers) => {
+      if (answer === 'manual') {
+        return 'Q2-9-manual';
+      }
+      return 'Q2-10';
+    }
+  },
+
+  // 手動入力フロー
+  {
+    id: 'Q2-9-manual',
+    question: '主な競合他社を教えてください。（複数ある場合はカンマ区切り）',
+    type: 'text',
+    priority: 1,
+    category: '競合分析',
+    validation: {
+      required: true,
+      maxLength: 200,
+      errorMessage: '200文字以内で入力してください'
+    },
+    examples: [
+      'A店、B店、C店',
+      '駅前のカフェチェーン店',
+      '同じ商店街の理容店3店舗'
+    ],
+    inputHint: '例：○○カフェ、△△喫茶店',
+    nextQuestion: (answer, answers) => 'Q2-10'
+  },
+
+  // ===== 自社の強み・差別化要因 =====
+  {
+    id: 'Q2-10',
+    question: '次に、御社の強みについて伺います。\n\nGoogle Mapsの口コミから強みを分析しますか？\n\n※ AIがお客様の声を分析します',
+    type: 'single_select',
+    priority: 1,
+    category: '強み・差別化',
+    options: [
+      { value: 'yes', label: 'はい、分析してほしい' },
+      { value: 'no', label: 'いいえ、自分で入力する' }
+    ],
+    validation: {
+      required: true
+    },
+    nextQuestion: (answer, answers) => {
+      if (answer === 'yes') {
+        return 'Q2-10-analyzing';
+      } else {
+        return 'Q2-10-manual';
+      }
+    }
+  },
+
+  // 口コミ分析中の表示
+  {
+    id: 'Q2-10-analyzing',
+    question: 'Google Mapsの口コミを分析しています...\n\n少々お待ちください。',
+    type: 'auto_analyze_reviews', // カスタムタイプ
+    priority: 1,
+    category: '強み・差別化',
+    autoExecute: true,
+    nextQuestion: (answer, answers) => 'Q2-10-result'
+  },
+
+  // 分析結果の表示
+  {
+    id: 'Q2-10-result',
+    question: (answers) => {
+      const result = answers['Q2-10-analyzing'] || {};
+      const keywords = result.keywords || [];
+      const strengthsText = result.strengthsText || '';
+
+      if (keywords.length === 0) {
+        return '口コミから特徴的なキーワードは見つかりませんでした。\n\n手動で入力しますか？';
+      }
+
+      return `口コミ分析の結果、以下の強みが見つかりました:\n\n${keywords.slice(0, 5).map((k, i) => `${i + 1}. 「${k.keyword}」 (${k.count}件の言及)`).join('\n')}\n\n${strengthsText}\n\nこの情報で問題ありませんか？`;
+    },
+    type: 'single_select',
+    priority: 1,
+    category: '強み・差別化',
+    options: [
+      { value: 'ok', label: 'はい、この情報で良い' },
+      { value: 'add', label: '追加で入力したい' },
+      { value: 'manual', label: 'いいえ、自分で入力し直す' }
+    ],
+    validation: {
+      required: true
+    },
+    nextQuestion: (answer, answers) => {
+      if (answer === 'add') {
+        return 'Q2-10-manual-add';
+      } else if (answer === 'manual') {
+        return 'Q2-10-manual';
+      }
+      return 'Q2-11';
+    }
+  },
+
+  // 追加入力
+  {
+    id: 'Q2-10-manual-add',
+    question: '追加で強みを入力してください。',
+    type: 'textarea',
+    priority: 1,
+    category: '強み・差別化',
+    validation: {
+      required: true,
+      maxLength: 500,
+      errorMessage: '500文字以内で入力してください'
+    },
+    nextQuestion: (answer, answers) => 'Q2-11'
+  },
+
+  // 手動入力フロー
+  {
+    id: 'Q2-10-manual',
+    question: '競合他社と比較した際の、御社の強みや差別化要因を教えてください。',
+    type: 'textarea',
+    priority: 1,
+    category: '強み・差別化',
+    validation: {
+      required: true,
+      minLength: 20,
+      maxLength: 500,
+      errorMessage: '20文字以上500文字以内で入力してください'
+    },
+    examples: [
+      '地元食材を使った手作りメニュー、アットホームな雰囲気、常連客が多い',
+      '最新設備を導入した技術力、短納期対応、細かなカスタマイズ対応',
+      '経験豊富なスタッフ、丁寧なカウンセリング、アフターフォロー'
+    ],
+    inputHint: '例：地元食材を使った手作り料理が評判です',
+    nextQuestion: (answer, answers) => 'Q2-11'
+  },

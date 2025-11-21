@@ -77,11 +77,14 @@ export const getUser = async (userId) => {
 export const updateUserPoints = async (userId, newBalance) => {
   try {
     const userDocRef = doc(firestore, COLLECTIONS.USERS, userId);
-    await updateDoc(userDocRef, {
+
+    // setDocを使用してドキュメントが存在しない場合も対応
+    // merge: true でドキュメントが存在しない場合は作成、存在する場合は更新
+    await setDoc(userDocRef, {
       pointBalance: newBalance,
       updatedAt: new Date()
-    });
-    
+    }, { merge: true });
+
     return true;
   } catch (error) {
     console.error('Error updating user points:', error);

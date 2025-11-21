@@ -51,113 +51,318 @@ export const generateSubsidyApplication = async (answers) => {
  * @returns {string} プロンプト
  */
 const buildApplicationPrompt = (answers) => {
-  // 店舗情報
-  const storeInfo = answers['Q2-0'] || {};
-  const representative = answers['Q2-2'] || '';
-  const openingDate = answers['Q2-3'] || '';
-  const fiscalMonth = answers['Q2-4'] || '';
-  const philosophy = answers['Q2-5'] || '';
-  const employees = answers['Q2-6'] || '';
+  // ===== Phase 1: 基本情報 =====
+  const placeInfo = answers['Q1-0'] || {};
+  const businessType = answers['Q1-1'] || '';
+  const representative = answers['Q1-2'] || '';
+  const mainServices = answers['Q1-3'] || '';
+  const additionalServices = answers['Q1-3-multi'] || '';
+  const employees = answers['Q1-4'] || '';
+  const openingDate = answers['Q1-5'] || '';
+  const businessForm = answers['Q1-6'] || '';
+  const operatingDays = answers['Q1-7'] || '';
+  const operatingDaysPerWeek = answers['Q1-8'] || '';
+  const subsidyPurpose = answers['Q1-9'] || '';
+  const isOperating = answers['Q1-10'] || '';
+  const pastSubsidyHistory = answers['Q1-11'] || '';
+  const fiscalStatus = answers['Q1-12'] || '';
+  const fiscalMonth = answers['Q1-13'] || '';
 
-  // 売上情報
-  const sales1 = answers['Q2-7-1'] || '';
-  const sales2 = answers['Q2-7-2'] || '';
-  const sales3 = answers['Q2-7-3'] || '';
+  // 財務データ（新規追加 Q1-14〜Q1-21）
+  const latestSales = answers['Q1-14'] || '';
+  const latestProfit = answers['Q1-15'] || '';
+  const previousSales = answers['Q1-16'] || '';
+  const previousProfit = answers['Q1-17'] || '';
+  const threeYearsAgoSales = answers['Q1-18'] || '';
+  const threeYearsAgoProfit = answers['Q1-19'] || '';
+  const grossProfitRate = answers['Q1-20'] || '';
+  const customerUnitPrice = answers['Q1-21'] || '';
 
-  // 経営状況
-  const profitStatus = answers['Q2-8'] || '';
-  const financialTrend = answers['Q2-9'] || '';
+  // ===== Phase 2: 顧客ニーズと市場の動向 =====
+  const targetCustomer = answers['P2-1'] || '';
+  const whyChosen = answers['P2-2'] || '';
+  const customerNeeds = answers['P2-3'] || '';
+  const needsChange = answers['P2-4'] || '';
+  const marketTrends = answers['P2-5'] || '';
+  const competitorComparison = answers['P2-6'] || '';
 
-  // 事業目的・取組
-  const businessGoals = answers['Q1-2'] || [];
-  const initiatives = answers['Q1-3'] || [];
+  // ===== Phase 3: 自社の強み =====
+  const uniqueness = answers['P3-1'] || '';
+  const customerValue = answers['P3-2'] || '';
+  const expertise = answers['P3-3'] || '';
+  const equipment = answers['P3-4'] || '';
+  const achievements = answers['P3-5'] || '';
+  const weaknesses = answers['P3-6'] || '';
+  const location = answers['P3-7'] || '';
+
+  // ===== Phase 4: 経営方針・目標 =====
+  const futureGoals = answers['P4-1'] || '';
+  const goalPlan = answers['P4-2'] || '';
+  const salesTarget = answers['P4-3'] || '';
+  const keyInitiatives = answers['P4-4'] || '';
+  const targetTimeline = answers['P4-5'] || '';
+  const longTermVision = answers['P4-6'] || '';
+  const managementChallenges = answers['P4-7'] || '';
+  const strengthToLeverage = answers['P4-8'] || '';
+
+  // ===== Phase 5: 補助事業の内容 =====
+  const subsidyUsage = answers['P5-1'] || '';
+  const plannedEquipment = answers['P5-2'] || '';
+  const implementationSchedule = answers['P5-3'] || '';
+  const expectedEffect = answers['P5-4'] || '';
+  const specificMeasures = answers['P5-5'] || '';
+  const targetCustomers = answers['P5-6'] || '';
+  const expenseBreakdown = answers['P5-7'] || '';
+  const webRelatedExpenses = answers['P5-8'] || '';
+  const advertisingPlan = answers['P5-9'] || '';
+  const salesIncreaseRationale = answers['P5-10'] || '';
+  const regionalContribution = answers['P5-11'] || '';
+  const innovationPoints = answers['P5-12'] || '';
 
   const prompt = `
 あなたは小規模事業者持続化補助金の申請書作成の専門家です。
-以下の情報を元に、審査に通りやすい高品質な申請書を作成してください。
+以下の情報を元に、審査に通りやすい高品質な「様式2（経営計画書兼補助事業計画書）」を作成してください。
 
-# 事業者情報
-- 店舗名：${storeInfo.name || ''}
-- 住所：${storeInfo.address || ''}
+# 【Phase 1】 基本情報
+
+## 事業者情報
+- 店舗名：${placeInfo.name || ''}
+- 住所：${placeInfo.address || ''}
+- 業種：${businessType}
 - 代表者：${representative}
+- 事業形態：${businessForm}
 - 開業年月：${openingDate}
 - 決算月：${fiscalMonth}
+
+## 提供商品・サービス
+- 主要サービス：${mainServices}
+- 追加事業：${additionalServices}
+
+## 経営状況
 - 常時雇用従業員数：${employees}
+- 営業日：${operatingDays}（${operatingDaysPerWeek}）
+- 決算状況：${fiscalStatus}
 
-# 事業理念・想い
-${philosophy}
+## 財務データ（過去3期分）
+- 直近期の年間売上：${latestSales}万円
+- 直近期の経常利益：${latestProfit}万円
+- 前々期の年間売上：${previousSales}万円
+- 前々期の経常利益：${previousProfit}万円
+- 3期前の年間売上：${threeYearsAgoSales}万円
+- 3期前の経常利益：${threeYearsAgoProfit}万円
+- 売上総利益率（粗利率）：${grossProfitRate}%
+- 客単価：${customerUnitPrice}円
 
-# 売上推移
-- 第1期：${sales1}万円
-- 第2期：${sales2}万円
-- 第3期：${sales3}万円
+## Google Maps情報
+- 評価：${placeInfo.rating || 'N/A'}（${placeInfo.userRatingsTotal || 0}件のレビュー）
+- 営業時間：${placeInfo.openingHours?.weekdayText?.join('、') || '情報なし'}
 
-# 経営状況
-- 経常利益：${profitStatus}
-- 財務推移：${financialTrend}
+# 【Phase 2】 顧客ニーズと市場の動向
 
-# 事業目的
-${businessGoals.join('、')}
+## ターゲット顧客
+${targetCustomer}
 
-# 予定している取組
-${initiatives.join('、')}
+## 選ばれる理由
+${whyChosen}
+
+## 顧客ニーズ
+${customerNeeds}
+
+## ニーズの変化
+${needsChange}
+
+## 市場トレンド
+${marketTrends}
+
+## 競合比較
+${competitorComparison}
+
+# 【Phase 3】 自社の強み
+
+## 独自性・差別化
+${uniqueness}
+
+## 顧客への価値
+${customerValue}
+
+## 専門性・資格
+${expertise}
+
+## 設備・技術
+${equipment}
+
+## 実績・評価
+${achievements}
+
+## 課題・弱み
+${weaknesses}
+
+## 立地・商圏
+${location}
+
+# 【Phase 4】 経営方針・目標
+
+## 今後の目標
+${futureGoals}
+
+## 目標達成の計画
+${goalPlan}
+
+## 売上目標
+${salesTarget}
+
+## 重点施策
+${keyInitiatives}
+
+## 実施時期
+${targetTimeline}
+
+## 長期ビジョン
+${longTermVision}
+
+## 経営課題
+${managementChallenges}
+
+## 活用する強み
+${strengthToLeverage}
+
+# 【Phase 5】 補助事業の内容
+
+## 補助金の使い道
+${subsidyUsage}
+
+## 購入予定の設備・システム
+${plannedEquipment}
+
+## 実施スケジュール
+${implementationSchedule}
+
+## 期待される効果
+${expectedEffect}
+
+## 具体的な施策
+${specificMeasures}
+
+## ターゲット顧客
+${targetCustomers}
+
+## 経費内訳
+${expenseBreakdown}
+
+## Web関連経費
+${webRelatedExpenses}
+
+## 広告計画
+${advertisingPlan}
+
+## 売上増加の根拠
+${salesIncreaseRationale}
+
+## 地域貢献
+${regionalContribution}
+
+## 創意工夫のポイント
+${innovationPoints}
 
 ---
 
-以下の構成で申請書を作成してください：
+# 【出力フォーマット】
 
-## 1. 企業概要（300-500文字）
-- 事業の内容、特徴、強み
-- 創業の経緯や想い
-- 地域での役割
+以下の構成で、CLAUDE.mdの様式2要件に準拠した申請書を作成してください：
 
-## 2. 顧客ニーズと市場の動向（400-600文字）
+## 【経営計画】
+
+### 1. 企業概要（800-1200文字）
+
+**記載内容:**
+- 事業の概要（創業年、主要サービス、顧客層）
+- 過去3期分の売上高・経常利益の推移（表形式）
+- 立地場所の特性
+- 主な商品・サービス（単価、営業利益率）
+- 業務状況（従業員数、業務内容、課題）
+
+**文体:** である調（常体）
+
+### 2. 顧客ニーズと市場の動向（800-1200文字）
+
+**記載内容:**
+- 市場全体の動向（業界トレンド）
 - ターゲット顧客層の明確化
-- 市場環境の分析
-- 顧客ニーズの変化
+- 顧客ニーズの分析
+- 市場環境の変化
+- 地域別の開拓余地
 
-## 3. 自社や自社の提供する商品・サービスの強み（400-600文字）
-- 独自性・差別化ポイント
-- 品質へのこだわり
-- 顧客満足度向上への取組
+**文体:** である調（常体）
 
-## 4. 経営方針・目標と今後のプラン（400-600文字）
-- 中長期的な経営ビジョン
-- 売上・利益目標
-- 具体的な行動計画
+### 3. 自社や自社の提供する商品・サービスの強み（800-1200文字）
 
-## 5. 補助事業で行う事業名（30文字以内）
+**記載内容:**
+- 競合他社と比較して優れている点（箇条書き●マーク）
+- 顧客に評価されている点
+- Google Maps口コミ等の具体的評価
+- 品質、技術、サービス、ノウハウ等の強み
+- 課題・弱み（対比として）
+
+**文体:** である調（常体）
+
+### 4. 経営方針・目標と今後のプラン（800-1200文字）
+
+**記載内容:**
+- 現状の課題認識
+- 今後の経営方針・目標（具体的な数値目標）
+- 目標達成のための具体的プラン（時期と行動）
+- 長期的プラン
+
+**文体:** である調（常体）
+
+## 【補助事業計画】
+
+### 1. 補助事業で行う事業名（30文字以内）
 簡潔で分かりやすい事業名を提案してください。
 
-## 6. 販路開拓等（生産性向上）の取組内容（1000-1500文字）
-- 取組の具体的内容
-- 実施スケジュール
-- 期待される効果
-- 地域経済への波及効果
+### 2. 販路開拓等（生産性向上）の取組内容（1200-1800文字）
 
-## 7. 業務効率化（生産性向上）の取組内容（該当する場合）
-設備導入等がある場合は記載。
+**記載内容:**
+- 前ページ「4. 経営方針・目標と今後のプラン」を踏まえた取組内容
+- 実施する施策ごとの詳細（目的、対象顧客、実施時期、実施方法）
+- これまでの自社・他社の取組と異なる点
+- 創意工夫した点、特徴
 
-## 8. 補助事業の効果（600-800文字）
-- 売上増加の根拠
-- 新規顧客獲得の見込み
-- 地域への貢献
+**文体:** である調（常体）
+
+### 3. 補助事業の効果（800-1200文字）
+
+**記載内容:**
+- 売上・取引にどのような効果があるか
+- 効果が出る理由
+- 具体的な数値見込み（顧客数増加、客単価向上、リピート率）
+- 短期効果と長期効果の区別
+
+**文体:** である調（常体）
 
 ---
 
-【重要な注意事項】
-1. 審査員が評価するポイント：
+# 【重要な注意事項】
+
+1. **文体を統一すること**
+   - 必ず「である調（常体）」を使用
+   - 「〜である」「〜だ」「〜する」等の語尾
+   - 「です・ます調」は絶対に使用しない
+
+2. **審査員が評価するポイント**
    - 事業の独自性・革新性
    - 実現可能性の高さ
    - 地域経済への貢献
    - 明確な数値目標
 
-2. 文章のトーン：
-   - 簡潔で分かりやすい表現
-   - 具体的なエピソードや数値を含める
-   - 熱意と誠実さが伝わる文章
+3. **必ず含めるべき要素**
+   - 過去3期分の売上・利益の推移（表形式）
+   - 具体的な数値データ（客単価、粗利率、顧客数等）
+   - Google Maps評価や口コミの引用
+   - 課題と解決策のセット
+   - 補助事業の効果の具体的な計算根拠
 
-3. 避けるべき表現：
+4. **避けるべき表現**
    - 抽象的・曖昧な表現
    - 誇張や根拠のない主張
    - 専門用語の多用

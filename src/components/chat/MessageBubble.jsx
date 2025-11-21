@@ -1,8 +1,14 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import './MessageBubble.css';
 
 const MessageBubble = ({ message, onAnswer, isLoading }) => {
   const { type, text, question, answer, timestamp } = message;
+  const [selectedOptions, setSelectedOptions] = useState([]);
+
+  // 質問が変わったら選択をリセット
+  useEffect(() => {
+    setSelectedOptions([]);
+  }, [question?.id]);
 
   const formatTimestamp = (timestamp) => {
     return new Date(timestamp).toLocaleTimeString('ja-JP', {
@@ -11,7 +17,7 @@ const MessageBubble = ({ message, onAnswer, isLoading }) => {
     });
   };
 
-  // 選択肢を番号付きリストで表示
+  // 選択肢をクリック可能なボタンで表示
   const renderOptions = () => {
     if (!question || !question.options || question.options.length === 0) {
       return null;
@@ -19,10 +25,78 @@ const MessageBubble = ({ message, onAnswer, isLoading }) => {
 
     const isMultiSelect = question.type === 'multi_select';
 
+    // single_select または multi_select の場合はクリック可能なボタンを表示
+    const isSelectable = question.type === 'single_select' || question.type === 'multi_select';
+
+    if (isSelectable) {
+      // ボタンクリック時の処理
+      const handleOptionClick = (optionValue) => {
+        if (isMultiSelect) {
+          // 複数選択の場合はトグル
+          setSelectedOptions(prev => {
+            if (prev.includes(optionValue)) {
+              return prev.filter(v => v !== optionValue);
+            } else {
+              return [...prev, optionValue];
+            }
+          });
+        } else {
+          // 単一選択の場合は即座に送信
+          onAnswer(question.id, optionValue);
+        }
+      };
+
+      // 確定ボタンのクリック処理
+      const handleConfirm = () => {
+        if (selectedOptions.length > 0) {
+          onAnswer(question.id, selectedOptions);
+          setSelectedOptions([]);
+        }
+      };
+
+      return (
+        <div className="question-options-buttons">
+          {question.options.map((option, index) => {
+            const displayText = typeof option === 'object' && option.label
+              ? option.label
+              : option;
+            const optionValue = typeof option === 'object' && option.value
+              ? option.value
+              : option;
+            const isSelected = selectedOptions.includes(optionValue);
+
+            return (
+              <button
+                key={index}
+                className={`option-button ${isSelected ? 'selected' : ''}`}
+                onClick={() => handleOptionClick(optionValue)}
+                disabled={isLoading}
+              >
+                {isSelected && '✓ '}
+                {displayText}
+              </button>
+            );
+          })}
+          {isMultiSelect && (
+            <>
+              <div className="input-hint">💡 複数選択できます。選択後に「確定」ボタンを押してください</div>
+              <button
+                className="confirm-selection-button"
+                onClick={handleConfirm}
+                disabled={isLoading || selectedOptions.length === 0}
+              >
+                確定（{selectedOptions.length}件選択中）
+              </button>
+            </>
+          )}
+        </div>
+      );
+    }
+
+    // 従来の番号付きリスト表示
     return (
       <div className="question-options-list">
         {question.options.map((option, index) => {
-          // optionが{value, label}形式のオブジェクトの場合はlabelを表示
           const displayText = typeof option === 'object' && option.label
             ? option.label
             : option;
@@ -45,7 +119,7 @@ const MessageBubble = ({ message, onAnswer, isLoading }) => {
 
   // 回答例を表示
   const renderExamples = () => {
-    if (!question || !question.examples || question.examples.length === 0) {
+    if (!question || !question.examples || !Array.isArray(question.examples) || question.examples.length === 0) {
       return null;
     }
 
@@ -67,64 +141,54 @@ const MessageBubble = ({ message, onAnswer, isLoading }) => {
       return null;
     }
 
+    // helpTextが関数の場合は評価する（answersを渡す）
+    let helpTextValue = question.helpText;
+    if (typeof question.helpText === 'function') {
+      try {
+        // answersは現在のコンテキストから取得する必要がある
+        // とりあえず空オブジェクトを渡す（後で改善）
+        helpTextValue = question.helpText({});
+      } catch (error) {
+        console.error('Error evaluating helpText function:', error);
+        return null;
+      }
+    }
+
+    // helpTextValueが文字列でない場合はスキップ
+    if (typeof helpTextValue !== 'string') {
+      return null;
+    }
+
     return (
       <div className="help-text">
-        {question.helpText.split('\n').map((line, index) => (
+        {helpTextValue.split('\n').map((line, index) => (
           <div key={index}>{line}</div>
         ))}
       </div>
     );
   };
 
-  // ここでの入力UIは使用しない（QuestionInputで一元管理）
-  const renderQuestionContent = () => null;
-
   const renderUserAnswer = () => {
     if (!answer) return null;
 
-    // 配列の場合
+    // 配列の場合（複数選択の回答）
     if (Array.isArray(answer)) {
-      return (
-        <div className="user-answer">
-          <strong>選択した項目:</strong>
-          <ul>
-            {answer.map((item, index) => (
-              <li key={index}>{item}</li>
-            ))}
-          </ul>
-        </div>
-      );
+      // 配列を「、」で結合して表示
+      return answer.join('、');
     }
 
     // オブジェクト（店舗情報など）の場合
     if (typeof answer === 'object' && answer !== null) {
       // 店舗情報の場合（nameフィールドがあれば店舗情報と判定）
       if (answer.name) {
-        return (
-          <div className="user-answer">
-            <strong>選択した店舗:</strong> {answer.name}
-            {answer.address && (
-              <div style={{ fontSize: '0.9em', color: '#666', marginTop: '4px' }}>
-                {answer.address}
-              </div>
-            )}
-          </div>
-        );
+        return answer.name;
       }
       // その他のオブジェクトの場合はJSON表示
-      return (
-        <div className="user-answer">
-          <strong>回答:</strong> {JSON.stringify(answer)}
-        </div>
-      );
+      return JSON.stringify(answer);
     }
 
     // 文字列や数値の場合
-    return (
-      <div className="user-answer">
-        <strong>回答:</strong> {answer}
-      </div>
-    );
+    return String(answer);
   };
 
   return (
@@ -138,8 +202,7 @@ const MessageBubble = ({ message, onAnswer, isLoading }) => {
         
         <div className="message-body">
           <div className="message-text">
-            {text}
-            {type === 'user' && renderUserAnswer()}
+            {type === 'user' ? renderUserAnswer() || text : text}
           </div>
 
           {/* AIメッセージの場合に選択肢・回答例・ヘルプテキストを表示 */}

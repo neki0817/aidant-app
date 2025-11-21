@@ -1,0 +1,18 @@
+    } else if (!question && Object.keys(answers).length > 0) {
+      // 質問がなくなった（ステップ完了）
+      // Step 1完了の場合
+      if (currentStep === 1 && isStep1Complete(answers)) {
+        setCurrentQuestion(null);
+        handleStepComplete();
+      }
+      // Step 2完了の場合
+      else if (currentStep === 2 && isStep2Complete(answers)) {
+        setCurrentQuestion(null);
+        handleStepComplete();
+      }
+      // その他のステップ
+      else if (currentQuestion) {
+        setCurrentQuestion(null);
+        handleStepComplete();
+      }
+    }

@@ -1,0 +1,20 @@
+  // ===== 競合分析 =====
+  {
+    id: 'Q2-9',
+    question: '主な競合他社を教えてください。（複数ある場合はカンマ区切り）\n\n例：A店、B店、C店',
+    type: 'text',
+    priority: 1,
+    category: '競合分析',
+    validation: {
+      required: true,
+      maxLength: 200,
+      errorMessage: '200文字以内で入力してください'
+    },
+    examples: [
+      'A店、B店、C店',
+      '駅前のカフェチェーン店',
+      '同じ商店街の理容店3店舗'
+    ],
+    inputHint: '例：○○カフェ、△△喫茶店',
+    nextQuestion: (answer, answers) => 'Q2-10'
+  },

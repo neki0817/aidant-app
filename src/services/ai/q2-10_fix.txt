@@ -1,0 +1,21 @@
+  // ===== 自社の強み・差別化要因 =====
+  {
+    id: 'Q2-10',
+    question: '競合他社と比較した際の、御社の強みや差別化要因を教えてください。',
+    type: 'textarea',
+    priority: 1,
+    category: '強み・差別化',
+    validation: {
+      required: true,
+      minLength: 20,
+      maxLength: 500,
+      errorMessage: '20文字以上500文字以内で入力してください'
+    },
+    examples: [
+      '地元食材を使った手作りメニュー、アットホームな雰囲気、常連客が多い',
+      '最新設備を導入した技術力、短納期対応、細かなカスタマイズ対応',
+      '経験豊富なスタッフ、丁寧なカウンセリング、アフターフォロー'
+    ],
+    inputHint: '例：地元食材を使った手作り料理が評判です',
+    nextQuestion: (answer, answers) => 'Q2-11'
+  },

@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>generateMockAnswer テスト</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      max-width: 900px;
+      margin: 50px auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    .container {
+      background: white;
+      padding: 30px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    h1 {
+      color: #333;
+      border-bottom: 3px solid #4285f4;
+      padding-bottom: 10px;
+    }
+    .store-info {
+      background: #e8f0fe;
+      padding: 15px;
+      border-radius: 5px;
+      margin: 20px 0;
+    }
+    .question-box {
+      background: #f8f9fa;
+      padding: 20px;
+      border-left: 4px solid #4285f4;
+      margin: 20px 0;
+    }
+    .answer-box {
+      background: #e8f5e9;
+      padding: 20px;
+      border-left: 4px solid #34a853;
+      margin: 20px 0;
+      white-space: pre-wrap;
+    }
+    .error-box {
+      background: #fce4ec;
+      padding: 20px;
+      border-left: 4px solid #ea4335;
+      margin: 20px 0;
+    }
+    button {
+      background: #4285f4;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      font-size: 16px;
+      border-radius: 5px;
+      cursor: pointer;
+      margin: 10px 5px 10px 0;
+    }
+    button:hover {
+      background: #357ae8;
+    }
+    button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    .loading {
+      color: #666;
+      font-style: italic;
+    }
+    .meta-info {
+      color: #666;
+      font-size: 14px;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>generateMockAnswer テスト</h1>
+
+    <div class="store-info">
+      <h3>テスト店舗: 珈琲館ブルーマウンテン</h3>
+      <p><strong>業種:</strong> カフェ</p>
+      <p><strong>立地:</strong> 東京都渋谷区（駅徒歩5分）</p>
+      <p><strong>特徴:</strong> 自家焙煎コーヒーと手作りケーキ、落ち着いた雰囲気</p>
+      <p><strong>顧客層:</strong> 30-40代女性、近隣オフィスワーカー、コーヒー愛好家</p>
+      <p><strong>Google Maps評価:</strong> 4.5点（150件のレビュー）</p>
+    </div>
+
+    <button onclick="testQuestion1()">質問1: ターゲット顧客（text）</button>
+    <button onclick="testQuestion2()">質問2: 顧客ニーズ（multi_select）</button>
+    <button onclick="testQuestion3()">質問3: 強み（multi_select）</button>
+    <button onclick="testAllQuestions()">全質問テスト</button>
+
+    <div id="results"></div>
+  </div>
+
+  <!-- Firebase SDK -->
+  <script type="module">
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js';
+    import { getFunctions, httpsCallable } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-functions.js';
+
+    // Firebase設定
+    const firebaseConfig = {
+      apiKey: "AIzaSyDLE3qqG2BpuuxKMRCHFGvKUemOhM_Ku9M",
+      authDomain: "aidant-app.firebaseapp.com",
+      projectId: "aidant-app",
+      storageBucket: "aidant-app.firebasestorage.app",
+      messagingSenderId: "629599163759",
+      appId: "1:629599163759:web:0ccb654f6ecf87f0ab87d5"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const functions = getFunctions(app, 'asia-northeast1');
+
+    // テスト用店舗プロフィール
+    const testStoreProfile = {
+      id: 'cafe_bluemountain',
+      name: '珈琲館ブルーマウンテン',
+      businessType: 'カフェ',
+      location: '東京都渋谷区（駅徒歩5分）',
+      feature: '自家焙煎コーヒーと手作りケーキ、落ち着いた雰囲気',
+      customerBase: '30-40代女性、近隣オフィスワーカー、コーヒー愛好家',
+      rating: 4.5,
+      reviewCount: 150,
+      yearsInBusiness: 3,
+      monthlySales: 120,
+      annualSales: 1440,
+      annualProfit: 240,
+      employees: 2,
+      subsidy_goal: 'オンライン販売サイト構築と焙煎機の増強'
+    };
+
+    // 質問リスト
+    const questions = [
+      {
+        id: 1,
+        question: 'あなたのお店に来店されるお客様は、主にどのような方ですか？年齢層、性別、職業など、できるだけ具体的に教えてください。',
+        questionType: 'text',
+        options: []
+      },
+      {
+        id: 2,
+        question: 'お客様は、あなたのお店で何を求めていると感じますか？',
+        questionType: 'multi_select',
+        options: ['美味しい料理', '雰囲気の良さ', '価格の手頃さ', '接客の良さ', '立地の便利さ', 'メニューの豊富さ', 'その他']
+      },
+      {
+        id: 3,
+        question: 'あなたのお店の強みは何ですか？他店と比べて優れている点を教えてください。',
+        questionType: 'multi_select',
+        options: ['料理の味', '食材の品質', '接客・サービス', '雰囲気・内装', '価格', '立地', 'メニューの独自性', 'その他']
+      }
+    ];
+
+    // Cloud Function呼び出し
+    async function callGenerateMockAnswer(questionData) {
+      const generateMockAnswer = httpsCallable(functions, 'generateMockAnswer');
+
+      const startTime = Date.now();
+
+      const result = await generateMockAnswer({
+        question: questionData.question,
+        storeProfile: testStoreProfile,
+        questionType: questionData.questionType,
+        options: questionData.options || []
+      });
+
+      const endTime = Date.now();
+      const duration = ((endTime - startTime) / 1000).toFixed(2);
+
+      return {
+        ...result.data,
+        duration
+      };
+    }
+
+    // 結果を表示
+    function displayResult(questionData, result, error = null) {
+      const resultsDiv = document.getElementById('results');
+
+      const questionBox = document.createElement('div');
+      questionBox.className = 'question-box';
+      questionBox.innerHTML = `
+        <h3>質問 ${questionData.id}: ${questionData.questionType}</h3>
+        <p><strong>質問文:</strong> ${questionData.question}</p>
+        ${questionData.options.length > 0 ? `<p><strong>選択肢:</strong> ${questionData.options.join(', ')}</p>` : ''}
+      `;
+      resultsDiv.appendChild(questionBox);
+
+      if (error) {
+        const errorBox = document.createElement('div');
+        errorBox.className = 'error-box';
+        errorBox.innerHTML = `
+          <h4>エラー</h4>
+          <p>${error.message}</p>
+        `;
+        resultsDiv.appendChild(errorBox);
+      } else {
+        const answerBox = document.createElement('div');
+        answerBox.className = 'answer-box';
+        answerBox.innerHTML = `
+          <h4>回答</h4>
+          <p>${result.answer}</p>
+          <div class="meta-info">
+            文字数: ${result.answer.length}文字 |
+            処理時間: ${result.duration}秒 |
+            店舗: ${result.storeProfile}
+          </div>
+        `;
+        resultsDiv.appendChild(answerBox);
+      }
+    }
+
+    // テスト関数
+    window.testQuestion1 = async function() {
+      document.getElementById('results').innerHTML = '<p class="loading">回答生成中...</p>';
+      try {
+        const result = await callGenerateMockAnswer(questions[0]);
+        document.getElementById('results').innerHTML = '';
+        displayResult(questions[0], result);
+      } catch (error) {
+        document.getElementById('results').innerHTML = '';
+        displayResult(questions[0], null, error);
+      }
+    };
+
+    window.testQuestion2 = async function() {
+      document.getElementById('results').innerHTML = '<p class="loading">回答生成中...</p>';
+      try {
+        const result = await callGenerateMockAnswer(questions[1]);
+        document.getElementById('results').innerHTML = '';
+        displayResult(questions[1], result);
+      } catch (error) {
+        document.getElementById('results').innerHTML = '';
+        displayResult(questions[1], null, error);
+      }
+    };
+
+    window.testQuestion3 = async function() {
+      document.getElementById('results').innerHTML = '<p class="loading">回答生成中...</p>';
+      try {
+        const result = await callGenerateMockAnswer(questions[2]);
+        document.getElementById('results').innerHTML = '';
+        displayResult(questions[2], result);
+      } catch (error) {
+        document.getElementById('results').innerHTML = '';
+        displayResult(questions[2], null, error);
+      }
+    };
+
+    window.testAllQuestions = async function() {
+      document.getElementById('results').innerHTML = '<p class="loading">全質問テスト実行中...</p>';
+      document.getElementById('results').innerHTML = '';
+
+      for (const q of questions) {
+        try {
+          const result = await callGenerateMockAnswer(q);
+          displayResult(q, result);
+          await new Promise(resolve => setTimeout(resolve, 500));
+        } catch (error) {
+          displayResult(q, null, error);
+        }
+      }
+    };
+
+    console.log('テストページ準備完了');
+  </script>
+</body>
+</html>
