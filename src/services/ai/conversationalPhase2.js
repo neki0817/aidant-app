@@ -1,10 +1,11 @@
 /**
  * Phase 2 会話形式質問生成サービス
  *
- * OpenAI APIを使って業種に応じた会話形式の質問を動的に生成
+ * Gemini 3.0 Pro Preview を使って業種に応じた会話形式の質問を動的に生成
  */
 
 import { getFunctions, httpsCallable } from 'firebase/functions';
+import { generateDynamicQuestions, mergeQuestions } from '../dynamicQuestionService';
 
 const functions = getFunctions(undefined, 'asia-northeast1');
 
@@ -90,6 +91,7 @@ export const consolidateConversationAnswers = async (businessType, dataItemId, d
 
 /**
  * Phase 2の会話状態を管理するクラス
+ * Gemini 3.0 Pro Preview による動的質問生成を活用
  */
 export class ConversationalPhase2Manager {
   constructor(businessType, allAnswers = {}) {
@@ -101,6 +103,9 @@ export class ConversationalPhase2Manager {
     this.conversationAnswers = {};
     this.isAwaitingConfirmation = false;
     this.consolidatedText = '';
+    this.useGemini = true; // Gemini 3.0 動的質問生成を使用
+    this.geminiQuestions = []; // Gemini生成質問のキャッシュ
+    this.industryInfo = null; // 業種情報
   }
 
   /**
@@ -119,6 +124,7 @@ export class ConversationalPhase2Manager {
 
   /**
    * 現在のデータ項目の会話を開始
+   * Gemini 3.0 で動的質問を生成（フォールバック: OpenAI）
    */
   async startDataItemConversation() {
     const dataItem = this.getNextDataItem();
@@ -129,7 +135,38 @@ export class ConversationalPhase2Manager {
 
     console.log(`[ConversationalPhase2Manager] Starting conversation for: ${dataItem.label}`);
 
-    // AI質問生成
+    // Gemini 3.0 動的質問生成を試行
+    if (this.useGemini && this.geminiQuestions.length === 0) {
+      try {
+        console.log('[ConversationalPhase2Manager] Trying Gemini 3.0 dynamic questions...');
+
+        const geminiResult = await generateDynamicQuestions(this.allAnswers, 'customerNeeds');
+
+        if (geminiResult.success && geminiResult.questions?.length > 0) {
+          console.log('[ConversationalPhase2Manager] Gemini 3.0 generated', geminiResult.questions.length, 'questions');
+          this.geminiQuestions = geminiResult.questions;
+          this.industryInfo = {
+            industry: geminiResult.industry,
+            category: geminiResult.industryCategory
+          };
+
+          // Gemini質問を使用（優先度でソート済み）
+          this.currentQuestions = this.geminiQuestions.filter(q =>
+            q.section === 'customerNeeds' || q.priority === 'high'
+          ).slice(0, 5); // 最大5問
+
+          this.currentQuestionIndex = 0;
+          this.conversationAnswers = {};
+          this.isAwaitingConfirmation = false;
+
+          return this.getCurrentQuestion();
+        }
+      } catch (geminiError) {
+        console.warn('[ConversationalPhase2Manager] Gemini 3.0 failed, falling back to OpenAI:', geminiError);
+      }
+    }
+
+    // フォールバック: 従来のOpenAI質問生成
     this.currentQuestions = await generateConversationalQuestions(
       this.businessType,
       dataItem.id,
@@ -251,6 +288,20 @@ export class ConversationalPhase2Manager {
    */
   isComplete() {
     return this.currentDataItemIndex >= PHASE2_DATA_ITEMS.filter(item => item.priority === 'high').length;
+  }
+
+  /**
+   * 業種情報を取得（Gemini 3.0 が判定した業種）
+   */
+  getIndustryInfo() {
+    return this.industryInfo;
+  }
+
+  /**
+   * Gemini生成質問があるか
+   */
+  hasGeminiQuestions() {
+    return this.geminiQuestions.length > 0;
   }
 }
 

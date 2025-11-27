@@ -26,6 +26,7 @@ import QuestionInput from './QuestionInput';
 import ProgressBar from './ProgressBar';
 import CompletenessIndicator from './CompletenessIndicator';
 import ApplicationDocument from '../document/ApplicationDocument';
+import QualityReport from '../document/QualityReport';
 import AiDraftOptions from './AiDraftOptions';
 import './ChatContainer.css';
 import StoreProfileEditor from './StoreProfileEditor';
@@ -54,6 +55,7 @@ const ChatContainer = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [currentQuestion, setCurrentQuestion] = useState(null);
   const [showDocument, setShowDocument] = useState(false);
+  const [showQualityReport, setShowQualityReport] = useState(false); // 品質レポート表示
   const [pendingAnswer, setPendingAnswer] = useState(null); // 補完待ちの回答
   const [aiDraft, setAiDraft] = useState(null); // AI生成下書き
   const [showAiOptions, setShowAiOptions] = useState(false); // AI提案の3択UI表示
@@ -240,14 +242,21 @@ const ChatContainer = () => {
         setPhase2Manager(manager);
 
         setIsLoading(true);
-        addAIMessage('業種に合わせた質問を準備しています...');
+        addAIMessage('Gemini 3.0で業種に合わせた質問を生成中...');
 
-        // 最初の質問を生成
+        // 最初の質問を生成（Gemini 3.0 動的質問生成を試行）
         manager.startDataItemConversation()
           .then(firstQuestion => {
             setIsLoading(false);
             if (firstQuestion) {
               console.log('[Phase 2 Conversational] First question:', firstQuestion);
+
+              // Gemini 3.0で業種判定された場合、業種情報を表示
+              const industryInfo = manager.getIndustryInfo();
+              if (industryInfo && manager.hasGeminiQuestions()) {
+                addAIMessage(`【業種判定】${industryInfo.category}\n\n業種に特化した質問を用意しました。`);
+              }
+
               setCurrentQuestion(firstQuestion);
               addAIMessage(firstQuestion.text, firstQuestion);
             } else {
@@ -928,7 +937,7 @@ const ChatContainer = () => {
             };
 
             setCurrentQuestion(candidateQuestion);
-            addAIMessage('', candidateQuestion);
+            // 質問のみ設定（空文字列のメッセージは作成しない）
             setIsLoading(false);
             return;
           }
@@ -976,7 +985,7 @@ const ChatContainer = () => {
             placeholder: '例：スターバックス 渋谷店、東京都渋谷区○○'
           };
           setCurrentQuestion(q10Question);
-          addAIMessage('', q10Question);
+          // 質問のみ設定（空文字列のメッセージは作成しない）
           setIsLoading(false);
           return;
         }
@@ -3251,14 +3260,26 @@ const ChatContainer = () => {
       )}
 
       <div className="chat-messages">
-        {messages.map((message) => (
-          <MessageBubble
-            key={message.id}
-            message={message}
-            onAnswer={handleAnswer}
-            isLoading={isLoading}
-          />
-        ))}
+        {messages.map((message) => {
+          // デバッグ: メッセージの構造を確認
+          if (message.question && message.question.options) {
+            console.log('[MessageBubble Debug] Message with options:', {
+              id: message.id,
+              text: message.text,
+              questionId: message.question.id,
+              optionsCount: message.question.options.length,
+              options: message.question.options
+            });
+          }
+          return (
+            <MessageBubble
+              key={message.id}
+              message={message}
+              onAnswer={handleAnswer}
+              isLoading={isLoading}
+            />
+          );
+        })}
         {isLoading && (
           <div className="loading-message">
             <div className="typing-indicator">
@@ -3347,10 +3368,27 @@ const ChatContainer = () => {
 
       {!currentQuestion && currentStep === 5 && isApplicationComplete() && (
         <div className="completion-actions">
+          <button onClick={() => setShowQualityReport(true)} className="quality-report-btn">
+            📊 品質チェック・改善提案
+          </button>
           <button onClick={() => setShowDocument(true)} className="generate-application-btn">
             📄 申請書を生成する
           </button>
         </div>
+      )}
+
+      {/* 品質レポートモーダル */}
+      {showQualityReport && (
+        <QualityReport
+          answers={answers}
+          onClose={() => setShowQualityReport(false)}
+          onApplySuggestion={(suggestion) => {
+            // 改善提案を適用する処理
+            console.log('Applying suggestion:', suggestion);
+            // TODO: 提案に基づいて該当する回答を更新
+            setShowQualityReport(false);
+          }}
+        />
       )}
     </div>
   );
