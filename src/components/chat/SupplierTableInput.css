@@ -1,10 +1,11 @@
 .supplier-table-input {
   background: #fff;
   border-radius: 8px;
-  padding: 20px;
+  padding: 16px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  max-width: 1200px;
+  max-width: 100%;
   margin: 0 auto;
+  overflow: hidden;
 }
 
 .supplier-input-header {
@@ -28,14 +29,24 @@
 
 .supplier-table-container {
   overflow-x: auto;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
+  -webkit-overflow-scrolling: touch;
+  /* スクロールヒント */
+  background:
+    linear-gradient(to right, white 30%, rgba(255,255,255,0)),
+    linear-gradient(to right, rgba(255,255,255,0), white 70%) 100% 0,
+    linear-gradient(to right, rgba(0,0,0,.1), rgba(0,0,0,0)),
+    linear-gradient(to right, rgba(0,0,0,0), rgba(0,0,0,.1)) 100% 0;
+  background-repeat: no-repeat;
+  background-size: 40px 100%, 40px 100%, 14px 100%, 14px 100%;
+  background-attachment: local, local, scroll, scroll;
 }
 
 .supplier-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 14px;
-  min-width: 900px;
+  font-size: 13px;
+  min-width: 650px;
 }
 
 .supplier-table thead {
@@ -43,42 +54,49 @@
 }
 
 .supplier-table th {
-  padding: 12px 8px;
+  padding: 10px 6px;
   text-align: left;
   font-weight: 600;
   color: #333;
   border-bottom: 2px solid #ddd;
   white-space: nowrap;
+  font-size: 12px;
 }
 
 .required-mark {
   color: #e74c3c;
-  margin-left: 4px;
-  font-size: 16px;
+  margin-left: 2px;
+  font-size: 14px;
 }
 
 .supplier-name-column {
-  width: 20%;
+  width: 22%;
+  min-width: 120px;
 }
 
 .product-name-column {
-  width: 25%;
+  width: 26%;
+  min-width: 130px;
 }
 
 .unit-price-column {
-  width: 15%;
+  width: 16%;
+  min-width: 90px;
 }
 
 .quantity-column {
   width: 10%;
+  min-width: 60px;
 }
 
 .total-column {
-  width: 15%;
+  width: 14%;
+  min-width: 90px;
 }
 
 .action-column {
-  width: 15%;
+  width: 12%;
+  min-width: 60px;
 }
 
 .supplier-table tbody tr {
@@ -98,17 +116,18 @@
 }
 
 .supplier-table td {
-  padding: 12px 8px;
+  padding: 8px 6px;
   vertical-align: top;
 }
 
 .supplier-input {
   width: 100%;
-  padding: 8px 12px;
+  padding: 6px 8px;
   border: 1px solid #ddd;
   border-radius: 4px;
-  font-size: 14px;
+  font-size: 13px;
   transition: border-color 0.3s;
+  box-sizing: border-box;
 }
 
 .supplier-input.numeric {
@@ -135,19 +154,20 @@
 
 .total-amount {
   color: #0066cc;
-  font-size: 16px;
+  font-size: 14px;
   white-space: nowrap;
 }
 
 .btn-remove-row {
-  padding: 6px 12px;
+  padding: 4px 8px;
   background-color: #fff;
   border: 1px solid #e74c3c;
   border-radius: 4px;
   color: #e74c3c;
-  font-size: 13px;
+  font-size: 12px;
   cursor: pointer;
   transition: all 0.3s;
+  white-space: nowrap;
 }
 
 .btn-remove-row:hover:not(:disabled) {
@@ -252,31 +272,72 @@
   box-shadow: 0 4px 8px rgba(0, 102, 204, 0.2);
 }
 
+/* スクロールヒントのメッセージ */
+.scroll-hint {
+  text-align: center;
+  font-size: 11px;
+  color: #888;
+  margin-bottom: 8px;
+  display: none;
+}
+
 /* レスポンシブ対応 */
-@media (max-width: 1024px) {
+@media (max-width: 800px) {
+  .scroll-hint {
+    display: block;
+  }
+
   .supplier-table-input {
-    padding: 15px;
+    padding: 12px;
+  }
+
+  .supplier-input-header h3 {
+    font-size: 16px;
+  }
+
+  .supplier-input-description {
+    font-size: 12px;
   }
 
   .supplier-table {
     font-size: 12px;
-    min-width: 800px;
+    min-width: 600px;
   }
 
   .supplier-table th,
   .supplier-table td {
-    padding: 8px 4px;
+    padding: 6px 4px;
+  }
+
+  .supplier-table th {
+    font-size: 11px;
   }
 
   .supplier-input {
-    font-size: 13px;
-    padding: 6px 8px;
+    font-size: 12px;
+    padding: 5px 6px;
+  }
+
+  .total-amount {
+    font-size: 12px;
+  }
+
+  .grand-total-amount {
+    font-size: 16px;
   }
 }
 
-@media (max-width: 768px) {
+@media (max-width: 600px) {
+  .supplier-table-input {
+    padding: 10px;
+  }
+
   .supplier-table-container {
-    margin-bottom: 15px;
+    margin-bottom: 12px;
+  }
+
+  .supplier-table {
+    min-width: 550px;
   }
 
   .button-group {
@@ -286,9 +347,18 @@
   .btn-cancel,
   .btn-submit {
     width: 100%;
+    padding: 10px 20px;
+    font-size: 14px;
   }
 
   .btn-add-row {
     width: 100%;
+    padding: 8px 16px;
+    font-size: 13px;
+  }
+
+  .help-notice {
+    font-size: 12px;
+    padding: 10px;
   }
 }

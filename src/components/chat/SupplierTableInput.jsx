@@ -158,6 +158,7 @@ const SupplierTableInput = ({ onSubmit, onCancel, initialItems = [] }) => {
         </p>
       </div>
 
+      <div className="scroll-hint">← 横にスクロールできます →</div>
       <div className="supplier-table-container">
         <table className="supplier-table">
           <thead>
@@ -171,7 +172,7 @@ const SupplierTableInput = ({ onSubmit, onCancel, initialItems = [] }) => {
             </tr>
           </thead>
           <tbody>
-            {items.map((item, index) => (
+            {items.map((item) => (
               <tr key={item.id} className={errors[item.id] ? 'error-row' : ''}>
                 <td>
                   <input
