@@ -5,11 +5,61 @@ const { test, expect } = require('@playwright/test');
  * 全フローテスト（Phase 0 → Phase 6）
  *
  * 実際のユーザーフローを通しでテストし、使用感を確認
+ * テスト店舗：クレアバッカス（赤坂のワインバー）
  */
 
 // テスト用認証情報
 const TEST_EMAIL = 'washo0410@gmail.com';
 const TEST_PASSWORD = 'neki12345@';
+
+// ===== リアルなテストデータ（クレアバッカス想定） =====
+const TEST_DATA = {
+  // 店舗基本情報
+  storeName: 'クレアバッカス 赤坂',
+  businessType: '飲食業（ワインバー）',
+  foundedYear: '2015',
+
+  // 売上・財務データ（年間）
+  annualSales: '2400',          // 年間売上 2,400万円
+  annualProfit: '180',          // 年間利益 180万円
+  monthlySales: '200',          // 月商 200万円
+  customerUnitPrice: '8000',    // 客単価 8,000円
+  grossProfitRate: '65',        // 粗利益率 65%
+  employeeCount: '3',           // 従業員数 3名
+  businessDays: '25',           // 月間営業日数 25日
+
+  // 顧客情報
+  targetCustomers: '30〜50代のビジネスパーソン、ワイン愛好家',
+  customerNeeds: '仕事帰りにゆったりとワインを楽しめる落ち着いた空間',
+  marketTrend: '赤坂エリアの再開発により人流が増加、健康志向でナチュラルワインの需要が拡大',
+
+  // 強み
+  strength: 'ソムリエ資格を持つオーナーによる厳選ワインのセレクション、産地直送のチーズとシャルキュトリー',
+  customerEvaluation: 'Google Maps評価4.5、「隠れ家的で落ち着ける」「ワインの知識が豊富で安心」との口コミ多数',
+  competitiveAdvantage: '大手チェーン店にはない個人店ならではのきめ細かいサービス、顧客の好みを覚えてのおすすめ提案',
+
+  // 経営目標
+  businessGoal: '新規顧客の開拓とリピート率向上により、年間売上を3,000万円に拡大',
+  salesTarget: '3000',          // 目標売上 3,000万円
+  targetGrowthRate: '25',       // 目標成長率 25%
+
+  // 補助事業計画
+  subsidyPurpose: 'SNS広告とオンライン予約システムの導入による新規顧客獲得',
+  plannedPurchase: 'ホームページリニューアル：50万円\nオンライン予約システム：20万円\nSNS広告費：10万円',
+  expectedEffect: '新規顧客月20名獲得、リピート率70%達成を目指す',
+  startMonth: '2025-04',
+  endMonth: '2025-09',
+  newCustomerCount: '20',       // 月間新規顧客数
+  repeatRate: '70',             // リピート率
+
+  // 仕入先情報
+  supplier: {
+    name: '株式会社ウェブクリエイト',
+    product: 'ホームページ制作・リニューアル',
+    unitPrice: '500000',
+    quantity: '1'
+  }
+};
 
 test.describe('全フローテスト', () => {
   test.setTimeout(600000); // 10分のタイムアウト
@@ -269,29 +319,29 @@ test.describe('全フローテスト', () => {
       if (await supplierTableConfirmBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
         console.log('  仕入先テーブル入力を検出');
 
-        // テーブルの各フィールドを入力
+        // テーブルの各フィールドを入力（リアルなデータ）
         // 仕入先名
         const supplierNameInput = page.locator('input[placeholder*="株式会社"]:visible').first();
         if (await supplierNameInput.isVisible({ timeout: 1000 }).catch(() => false)) {
-          await supplierNameInput.fill('株式会社テスト');
+          await supplierNameInput.fill(TEST_DATA.supplier.name);
         }
 
         // 商品・サービス名
         const productNameInput = page.locator('input[placeholder*="POSレジ"]:visible').first();
         if (await productNameInput.isVisible({ timeout: 1000 }).catch(() => false)) {
-          await productNameInput.fill('POSレジシステム');
+          await productNameInput.fill(TEST_DATA.supplier.product);
         }
 
         // 単価
         const unitPriceInput = page.locator('input[placeholder="300000"]:visible').first();
         if (await unitPriceInput.isVisible({ timeout: 1000 }).catch(() => false)) {
-          await unitPriceInput.fill('300000');
+          await unitPriceInput.fill(TEST_DATA.supplier.unitPrice);
         }
 
         // 数量
         const quantityInput = page.locator('input[placeholder="1"]:visible').first();
         if (await quantityInput.isVisible({ timeout: 1000 }).catch(() => false)) {
-          await quantityInput.fill('1');
+          await quantityInput.fill(TEST_DATA.supplier.quantity);
         }
 
         await page.waitForTimeout(500);
@@ -310,7 +360,17 @@ test.describe('全フローテスト', () => {
         console.log('  日付入力');
         // month inputの場合は"YYYY-MM"形式、date inputの場合は"YYYY-MM-DD"形式
         const inputType = await dateInput.getAttribute('type');
-        const dateValue = inputType === 'month' ? '2020-04' : '2020-04-01';
+        // 質問内容に応じて適切な日付を選択
+        let dateValue;
+        if (messageText?.includes('開始') || messageText?.includes('いつから')) {
+          dateValue = inputType === 'month' ? TEST_DATA.startMonth : '2025-04-01';
+        } else if (messageText?.includes('完了') || messageText?.includes('いつまで')) {
+          dateValue = inputType === 'month' ? TEST_DATA.endMonth : '2025-09-30';
+        } else if (messageText?.includes('創業') || messageText?.includes('開業')) {
+          dateValue = inputType === 'month' ? '2015-04' : '2015-04-01';
+        } else {
+          dateValue = inputType === 'month' ? '2020-04' : '2020-04-01';
+        }
         await dateInput.fill(dateValue);
         // 送信ボタンをクリック
         const submitBtn = page.locator('.submit-button-simple:visible, button:has-text("送信"):visible').first();
@@ -328,12 +388,32 @@ test.describe('全フローテスト', () => {
       // まずtextareaを優先的にチェック（P5-1, P5-2などで使用）
       const textareaInput = page.locator('.textarea-simple:visible, .question-input-simple textarea:visible').first();
       if (await textareaInput.isVisible({ timeout: 1000 }).catch(() => false)) {
-        // Phase 5の費用入力の場合、サンプル形式で入力
-        const isP5Cost = messageText?.includes('費用') || messageText?.includes('P5-2');
-        const textareaValue = isP5Cost
-          ? 'POSレジシステム：30万円\nホームページ制作：50万円'
-          : 'テスト回答です';
-        console.log(`  テキストエリア入力 (${isP5Cost ? '費用形式' : '通常'})`);
+        // 質問内容に応じて適切な回答を選択
+        let textareaValue;
+        if (messageText?.includes('費用') || messageText?.includes('P5-2') || messageText?.includes('金額')) {
+          textareaValue = TEST_DATA.plannedPurchase;
+        } else if (messageText?.includes('購入') || messageText?.includes('導入') || messageText?.includes('P5-1')) {
+          textareaValue = TEST_DATA.subsidyPurpose;
+        } else if (messageText?.includes('効果') || messageText?.includes('期待')) {
+          textareaValue = TEST_DATA.expectedEffect;
+        } else if (messageText?.includes('強み') || messageText?.includes('特徴')) {
+          textareaValue = TEST_DATA.strength;
+        } else if (messageText?.includes('顧客') || messageText?.includes('ターゲット')) {
+          textareaValue = TEST_DATA.targetCustomers;
+        } else if (messageText?.includes('ニーズ') || messageText?.includes('求めて')) {
+          textareaValue = TEST_DATA.customerNeeds;
+        } else if (messageText?.includes('市場') || messageText?.includes('トレンド') || messageText?.includes('動向')) {
+          textareaValue = TEST_DATA.marketTrend;
+        } else if (messageText?.includes('目標') || messageText?.includes('方針')) {
+          textareaValue = TEST_DATA.businessGoal;
+        } else if (messageText?.includes('評価') || messageText?.includes('口コミ')) {
+          textareaValue = TEST_DATA.customerEvaluation;
+        } else if (messageText?.includes('競合') || messageText?.includes('違い')) {
+          textareaValue = TEST_DATA.competitiveAdvantage;
+        } else {
+          textareaValue = 'ワインバーとして、お客様に寛ぎの時間と上質なワイン体験を提供しています。';
+        }
+        console.log(`  テキストエリア入力: ${textareaValue.substring(0, 30)}...`);
         await textareaInput.fill(textareaValue);
         // 送信ボタンをクリック
         const submitBtn = page.locator('.submit-button-simple:visible, button:has-text("送信"):visible').first();
@@ -364,10 +444,50 @@ test.describe('全フローテスト', () => {
         }
       }
       if (textInput) {
-        // input[type="number"]の場合は数値を入力
         const inputType = await textInput.getAttribute('type');
-        const inputValue = inputType === 'number' ? '3' : 'テスト回答です';
-        console.log(`  テキスト入力 (type=${inputType})`);
+
+        // 質問内容に応じた適切な値を決定
+        let inputValue;
+        if (inputType === 'number') {
+          // 数値入力の場合、質問内容に応じて適切な値を選択
+          if (messageText?.includes('売上') && messageText?.includes('年')) {
+            inputValue = TEST_DATA.annualSales;
+          } else if (messageText?.includes('売上') && messageText?.includes('月')) {
+            inputValue = TEST_DATA.monthlySales;
+          } else if (messageText?.includes('利益')) {
+            inputValue = TEST_DATA.annualProfit;
+          } else if (messageText?.includes('客単価') || messageText?.includes('単価')) {
+            inputValue = TEST_DATA.customerUnitPrice;
+          } else if (messageText?.includes('粗利') || messageText?.includes('利益率')) {
+            inputValue = TEST_DATA.grossProfitRate;
+          } else if (messageText?.includes('従業員') || messageText?.includes('スタッフ')) {
+            inputValue = TEST_DATA.employeeCount;
+          } else if (messageText?.includes('営業日')) {
+            inputValue = TEST_DATA.businessDays;
+          } else if (messageText?.includes('新規') && messageText?.includes('顧客')) {
+            inputValue = TEST_DATA.newCustomerCount;
+          } else if (messageText?.includes('リピート') || messageText?.includes('再来店')) {
+            inputValue = TEST_DATA.repeatRate;
+          } else if (messageText?.includes('目標') && messageText?.includes('売上')) {
+            inputValue = TEST_DATA.salesTarget;
+          } else if (messageText?.includes('成長') || messageText?.includes('増加')) {
+            inputValue = TEST_DATA.targetGrowthRate;
+          } else {
+            // デフォルト値（適度な数値）
+            inputValue = '200';
+          }
+        } else {
+          // テキスト入力の場合
+          if (messageText?.includes('業種')) {
+            inputValue = TEST_DATA.businessType;
+          } else if (messageText?.includes('創業') || messageText?.includes('設立')) {
+            inputValue = TEST_DATA.foundedYear;
+          } else {
+            inputValue = 'ワインバー経営';
+          }
+        }
+
+        console.log(`  入力 (type=${inputType}): ${inputValue}`);
         await textInput.fill(inputValue);
         // 送信ボタンをクリック
         const submitBtn = page.locator('.submit-button-simple:visible, button:has-text("送信"):visible').first();
